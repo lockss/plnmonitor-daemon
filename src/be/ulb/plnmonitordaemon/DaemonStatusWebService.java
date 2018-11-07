@@ -1,45 +1,27 @@
+
 package be.ulb.plnmonitordaemon;
-
-import java.io.IOException;
-import java.io.PrintWriter;
-
-import javax.net.ssl.HttpsURLConnection;
-
 
 import java.net.Authenticator;
 import java.net.PasswordAuthentication;
 import java.net.URL;
-import java.security.Security;
 import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.text.DateFormat;
-import java.text.SimpleDateFormat;
 import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Date;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.TimeZone;
-import java.util.Vector;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import javax.xml.namespace.QName;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
-import javax.xml.parsers.FactoryConfigurationError;
-import javax.xml.parsers.ParserConfigurationException;
-import javax.xml.parsers.SAXParserFactory;
 import javax.xml.ws.Service;
 import javax.xml.ws.WebServiceException;
-
-import org.apache.commons.io.FileUtils;
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;
 import org.apache.http.client.CredentialsProvider;
@@ -50,8 +32,6 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 import org.lockss.ws.entities.AuWsResult;
-import org.lockss.ws.entities.IdNamePair;
-import org.lockss.ws.entities.LockssWebServicesFault;
 import org.lockss.ws.entities.PeerWsResult;
 import org.lockss.ws.entities.PlatformConfigurationWsResult;
 import org.lockss.ws.entities.RepositorySpaceWsResult;
@@ -61,35 +41,84 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-import org.xml.sax.InputSource;
-import org.xml.sax.SAXException;
-import org.xml.sax.XMLReader;
 
-import java.net.URL;
 
+/**
+ * The Class DaemonStatusWebService.
+ * 
+ * Retrieves all available status info from all LOCKSS boxes in the network (found via initialV3PeerList in LOCKSS lockss.xml network config file 
+ * via the DaemonStatusWebService with debug user access to LOCKSS web user interface 
+ * 
+ * Stores all info in a PostgreSQL DB. The db is configured with trigger functions to automatically keep all history after an upsert.
+ * <p>
+ * <h2>Known issues:</h2> 
+ * <h3>1. SOAP access to LOCKSS boxes in SSL mode. </h3>
+ * While the Daemon Status web service is directly accessible with basic authentication, when SSL is switched on, the authentication is done with a form-based login webpage.
+ * Tried to pass the username and password directly in the header of the WSDL request but it didn’t work. 
+ * Also tried implementing an Apache HTTPclient to initiate and maintain the authenticated connection for the web service requests but, still, without success.
+ * Given that the access control mechanism will be considerably improved in LAAWS (Shibboleth), more useful to focus on the other plnmonitor features
+ *
+ * <h3>2. Dumb usage of the database</h3>
+ * It would be much more efficient to store only status information transitions and not every status value
+ * 
+ * @author Anthony Leroy
+ * @version 0.7
+ */
 public class DaemonStatusWebService {
+	
+	/** The Constant DB_DRIVER. Hardcoded parameter of postgresql driver */
 	private static final String DB_DRIVER = "org.postgresql.Driver";
+	
+	/** The Constant DB_CONNECTION. Hardcoded parameter of plnmonitor DB connection to localhost*/
 	private static final String DB_CONNECTION = "jdbc:postgresql://127.0.0.1:5432/plnmonitor";
+	
+	/** The Constant DB_USER. Hardcoded plnmonitor db username*/
 	private static final String DB_USER = "plnmonitor";
+	
+	/** The Constant DB_PASSWORD. Hardcoded plnmonitor db password*/
 	private static final String DB_PASSWORD = "plnmonitor";
 
-
+	//TODO: use username from the database for specific box instead of hardcoded value 
+	/** The Constant USER_NAME. Hardcoded daemon UI user name with debug info access only (read) for all lockss boxes in the network (8081)*/
 	private static final String USER_NAME = "debug";
+
+	//TODO: use password from the database for specific box instead of hardcoded value
+	/** The Constant PASSWORD. Hardcoded daemon UI debug userpassword with debug info access only (read) for all lockss boxes in the network (8081)*/
 	private static final String PASSWORD = "debuglockss";
+	
+	//TODO: use protocol from the database for specific box
+	/** The Constant prefixDSS. Http prefix for Daemon Status Web Service URL*/
 	private static final String prefixDSS = "http://";
+	
+	//TODO: use protocol from the database for specific box
+	/** The Constant prefixSDSS. Https prefix for Daemon Status Web Service URL*/
 	private static final String prefixSDSS = "https://";
 
+	//TODO: use DSS parameters from the database for specific box (no hardcoded 8081 port but instead specific to box)
+	/** The Constant postfixDSS. Postfix for Daemon Status Web Service URL */
 	private static final String postfixDSS = ":8081/ws/DaemonStatusService?wsdl";
+	
+	/** The Constant TARGET_NAMESPACE. Daemon Status Service namespace  */
 	private static final String TARGET_NAMESPACE = "http://status.ws.lockss.org/";
+	
+	/** The Constant SERVICE_NAME. Daemon Status Service service name*/
 	private static final String SERVICE_NAME = "DaemonStatusServiceImplService";
+	
+	/** The Constant QUERY. Daemon Status Service query to get all available info in specific order*/
 	private static final String QUERY = "select auId, name, volume, pluginName, tdbYear, accessType, contentSize, diskUsage, recentPollAgreement, tdbPublisher, availableFromPublisher, substanceState, creationTime, crawlProxy, crawlWindow, crawlPool, lastCompletedCrawl, lastCrawl, lastCrawlResult, lastCompletedPoll, lastPollResult, currentlyCrawling, currentlyPolling, subscriptionStatus, auConfiguration, newContentCrawlUrls, urlStems, isBulkContent, peerAgreements";
 
+	/** The Constant IPV4_PATTERN. Grep expression to identify IP address of LOCKSS boxes in the LOCKSS xml file*/
 	private static final String IPV4_PATTERN = 
 			"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)";
 
-
-	// getPLNConfigurationFiles reads database entry in PLN table
-	// returns url for lockss.xml config file for each pln in a List<String> 
+ 
+	/**
+	 * Gets URLs of the lockss.xml configuration file for each LOCKSS network available in the database 
+	 * 
+	 *
+	 * @return returns url for lockss.xml config file for each LOCKSS network in a List (LOCKSS network ID, lockss.xml URL)
+	 * @throws SQLException the SQL exception
+	 */
 	public HashMap<Integer, String> getPLNConfigurationFiles() throws SQLException{
 		Connection dbConnection = null;
 		HashMap<Integer,String> configurationFiles = new HashMap<Integer,String>(); 
@@ -116,8 +145,17 @@ public class DaemonStatusWebService {
 	}
 
 
-	//loadPLNConfiguration
-	// read content of lockss.xml 
+	/**
+	 * Load PLN configuration
+	 *
+	 * Return IP addresses of all the boxes in the LOCKSS network based on 
+	 * the lockss.xml configuration file initialV3PeerList section
+	 * 
+	 *  
+	 * @param plnID the pln ID in the database
+	 * @param configUrl the URL of the lockss.xml file for the given LOCKSS network
+	 * @return plnMembers : the list of box IP addresses in the network 
+	 */
 	// put all pln members IP address in plnMembers
 	public List<String> loadPLNConfiguration(Integer plnID, String configUrl){
 		List<String> plnMembers=new  ArrayList<String>();
@@ -158,8 +196,19 @@ public class DaemonStatusWebService {
 		return (plnMembers);
 	}
 
-	// loadDaemonStatus: get the status from a LOCKSS box identified by its IP address boxIpAddress
-	
+	/**
+	 * Load daemon status.
+	 *
+	 * Get all available status info from a LOCKSS box identified by its IP address boxIpAddress:
+	 * - Archival Units info in the box
+	 * - Repository Space from the box
+	 * - Peers of the box
+	 * - Repository info from the box
+	 *
+	 * @param plnID the pln ID in the database
+	 * @param boxIpAddress the box ip address
+	 * @throws SQLException the SQL exception
+	 */
 	public void loadDaemonStatus(Integer plnID, String boxIpAddress) throws SQLException{
 		Connection dbConnection = null;
 		PreparedStatement preparedStatement=null;
@@ -170,47 +219,41 @@ public class DaemonStatusWebService {
 		List<RepositoryWsResult> repo = null;
 		PlatformConfigurationWsResult boxConfiguration = null;
 		Integer boxId=null;
+		Map<String, String> headers = null;
 
 		try {
 			// Call the service and get the results of the query.
 			// Store AUs results for each server in a Hashmap (server name, list of Aus)
 			this.authenticate(); //basic authentication (inline)
 
-			String serviceAddress=prefixDSS+boxIpAddress+postfixDSS; 
+			String boxHostname = boxIpAddress;
+			
+			//ugly fix for UGent - please ignore this
+			if (boxIpAddress.matches("157.193.230.142")) {
+				boxHostname = "shaw.ugent.be";
+			}
+			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
 
 			try {
+
 				service = Service.create(new URL(serviceAddress), new QName(
 						TARGET_NAMESPACE, SERVICE_NAME));
-				
+
 			}
 
 			catch (WebServiceException e) {
 				System.out.println(e.toString());
-				System.out.println("Trying secure connnection..." + prefixSDSS);
-			
-				try {
-					if (boxIpAddress.matches("157.193.230.142")) {
-						boxIpAddress = "shaw.ugent.be";
-					}
-					this.formAuthenticate(boxIpAddress);
-
-					service = Service.create(new URL(prefixSDSS+boxIpAddress+postfixDSS), new QName(
-							TARGET_NAMESPACE, SERVICE_NAME));
-				
-				}
-				catch (WebServiceException ex) {
-					System.out.println(ex.toString());
-					System.out.println("Nothing do... connection lost");
-				}
+				System.out.println("Nothing to do connnection unavailable...");
 			}
 
 			try {
 				if (service != null) {  //if service available, get all data from the LOCKSS box
-					boxConfiguration =service.getPort(DaemonStatusService.class).getPlatformConfiguration();
-					repositoryBox = service.getPort(DaemonStatusService.class).queryRepositorySpaces("select *");
-					ausFromCurrentBox = service.getPort(DaemonStatusService.class).queryAus(QUERY);
-					peersBox = service.getPort(DaemonStatusService.class).queryPeers("select *");
-					repo = service.getPort(DaemonStatusService.class).queryRepositories("select *");
+					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					boxConfiguration = dss.getPlatformConfiguration();
+					repositoryBox = dss.queryRepositorySpaces("select *");
+					ausFromCurrentBox = dss.queryAus(QUERY);
+					peersBox = dss.queryPeers("select *");
+					repo = dss.queryRepositories("select *");
 				}
 			}
 			catch (WebServiceException e) {
@@ -221,23 +264,24 @@ public class DaemonStatusWebService {
 			if (boxConfiguration!=null){
 				//update LOCKSS box config in the LOCKSS_box database
 				//upsert: if box date identified by (ipaddress+pln id) is already in the database, update entry otherwise insert 
+				//upsert is not available in Postgres 9.4
 				try {
-					
+
 					String insertTableSQL = 
 							"WITH upsert AS " +
-						    "(UPDATE plnmonitor.lockss_box " +
-							"SET uiport = ?, " +
-							"groups = ?, " +
-							"v3identity = ?, " +
-							"uptime = ?, " +
-							"admin_email = ?, " +
-							"disks = ?, " +
-							"\"current_time\" = ?, " +
-							"daemon_full_version = ?, " +
-							"java_version = ?, " +
-							"platform = ? " +
-							"WHERE ipaddress=? and pln=? RETURNING *), " +
-							
+									"(UPDATE plnmonitor.lockss_box " +
+									"SET uiport = ?, " +
+									"groups = ?, " +
+									"v3identity = ?, " +
+									"uptime = ?, " +
+									"admin_email = ?, " +
+									"disks = ?, " +
+									"\"current_time\" = ?, " +
+									"daemon_full_version = ?, " +
+									"java_version = ?, " +
+									"platform = ? " +
+									"WHERE ipaddress=? and pln=? RETURNING *), " +
+
 							"inserted AS ("+
 							"INSERT INTO plnmonitor.lockss_box " +
 							"(ipaddress,uiport,pln,groups,v3identity,uptime,admin_email,disks,\"current_time\", daemon_full_version, java_version, platform) "+
@@ -262,10 +306,10 @@ public class DaemonStatusWebService {
 					preparedStatement.setString(8, boxConfiguration.getDaemonVersion().toString().replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(9, boxConfiguration.getJavaVersion().toString().replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(10, boxConfiguration.getPlatform().toString().replaceAll("\\[|\\]", ""));
-					
+
 					preparedStatement.setString(11, boxIpAddress);
 					preparedStatement.setInt(12, plnID);
-					
+
 					preparedStatement.setString(13, boxIpAddress);
 					preparedStatement.setString(14, "8081");
 					preparedStatement.setInt(15, plnID);
@@ -278,14 +322,12 @@ public class DaemonStatusWebService {
 					preparedStatement.setString(22, boxConfiguration.getDaemonVersion().toString().replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(23, boxConfiguration.getJavaVersion().toString().replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(24, boxConfiguration.getPlatform().toString().replaceAll("\\[|\\]", ""));
-					System.out.println(preparedStatement.toString());
 					ResultSet rs=preparedStatement.executeQuery();
-					//ResultSet rs = preparedStatement.getResultSet();
 					if (rs.next()) {
 						boxId = rs.getInt("id");
 					}
 					System.out.println("Entry for pln: "+ plnID + " with IP address "+boxIpAddress + " ----- " + boxConfiguration.getIpAddress() + "V3 identity:" +  boxConfiguration.getV3Identity() + " is inserted/updated into LOCKSS_BOX table at position "+ boxId);
-					
+
 				} catch (SQLException e) {
 					System.out.println(e.getMessage());
 
@@ -298,94 +340,83 @@ public class DaemonStatusWebService {
 					}
 				}	
 			}
-			
-			
-			
-			
+
+
 			// if repository box data is collected for the current LOCKSS Box identified by box id and repository_space_lockss_id
 			// insert the results in the table lockss_box_data_current
-			
+
 			if (repositoryBox != null) {
-					for (RepositorySpaceWsResult currentBoxResult : repositoryBox) {
-						try {							
-							String insertTableSQL = "WITH upsert AS (UPDATE plnmonitor.lockss_box_data_current " +
-									"SET used = ?, " +
-									"size = ?, " +
-									"free = ?, " +
-									"percentage = ?, " +
-									"active_aus = ?, " +
-									"deleted_aus = ?, " +
-									"inactive_aus = ?, " +
-									"orphaned_aus = ? " +
-									"WHERE box=? and repository_space_lockss_id=? RETURNING *)" +
-									"INSERT INTO plnmonitor.lockss_box_data_current" +
-									"(box,used,size,free,percentage,active_aus, repository_space_lockss_id, deleted_aus, inactive_aus, orphaned_aus) "+
-									"SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS "+
-									"(SELECT * FROM upsert)";
-							
-							dbConnection = getDBConnection();
-							preparedStatement = dbConnection.prepareStatement(insertTableSQL);
-							preparedStatement.setLong(1, currentBoxResult.getUsed());
-							preparedStatement.setLong(2, currentBoxResult.getSize());
-							preparedStatement.setLong(3, currentBoxResult.getFree());
-							preparedStatement.setDouble(4, currentBoxResult.getPercentageFull());
-							preparedStatement.setLong(5, currentBoxResult.getActiveCount());
-							preparedStatement.setLong(6, currentBoxResult.getDeletedCount());
-							preparedStatement.setLong(7, currentBoxResult.getInactiveCount());
-							preparedStatement.setLong(8, currentBoxResult.getOrphanedCount());
-							
-							preparedStatement.setLong(9, boxId );
-							preparedStatement.setString(10, currentBoxResult.getRepositorySpaceId());
-							
-							preparedStatement.setLong(11, boxId );
-							preparedStatement.setLong(12, currentBoxResult.getUsed());
-							preparedStatement.setLong(13, currentBoxResult.getSize());
-							preparedStatement.setLong(14, currentBoxResult.getFree());
-							preparedStatement.setDouble(15, currentBoxResult.getPercentageFull());
-							preparedStatement.setLong(16, currentBoxResult.getActiveCount());
-							preparedStatement.setString(17, currentBoxResult.getRepositorySpaceId());
-							preparedStatement.setLong(18,currentBoxResult.getDeletedCount());
-							preparedStatement.setLong(19,currentBoxResult.getInactiveCount());
-							preparedStatement.setLong(20, currentBoxResult.getOrphanedCount());
+				for (RepositorySpaceWsResult currentBoxResult : repositoryBox) {
+					try {							
+						String insertTableSQL = "WITH upsert AS (UPDATE plnmonitor.lockss_box_data_current " +
+								"SET used = ?, " +
+								"size = ?, " +
+								"free = ?, " +
+								"percentage = ?, " +
+								"active_aus = ?, " +
+								"deleted_aus = ?, " +
+								"inactive_aus = ?, " +
+								"orphaned_aus = ? " +
+								"WHERE box=? and repository_space_lockss_id=? RETURNING *)" +
+								"INSERT INTO plnmonitor.lockss_box_data_current" +
+								"(box,used,size,free,percentage,active_aus, repository_space_lockss_id, deleted_aus, inactive_aus, orphaned_aus) "+
+								"SELECT ?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS "+
+								"(SELECT * FROM upsert)";
 
-							System.out.println(preparedStatement.toString());
-							preparedStatement.executeUpdate();
+						dbConnection = getDBConnection();
+						preparedStatement = dbConnection.prepareStatement(insertTableSQL);
+						preparedStatement.setLong(1, currentBoxResult.getUsed());
+						preparedStatement.setLong(2, currentBoxResult.getSize());
+						preparedStatement.setLong(3, currentBoxResult.getFree());
+						preparedStatement.setDouble(4, currentBoxResult.getPercentageFull());
+						preparedStatement.setLong(5, currentBoxResult.getActiveCount());
+						preparedStatement.setLong(6, currentBoxResult.getDeletedCount());
+						preparedStatement.setLong(7, currentBoxResult.getInactiveCount());
+						preparedStatement.setLong(8, currentBoxResult.getOrphanedCount());
 
-							System.out.println("Record is inserted and updated into database table LOCKSS_box_data_current for boxId" + boxId + " Repository Id: " + currentBoxResult.getRepositorySpaceId());
+						preparedStatement.setLong(9, boxId );
+						preparedStatement.setString(10, currentBoxResult.getRepositorySpaceId());
 
-						} catch (SQLException e) {
+						preparedStatement.setLong(11, boxId );
+						preparedStatement.setLong(12, currentBoxResult.getUsed());
+						preparedStatement.setLong(13, currentBoxResult.getSize());
+						preparedStatement.setLong(14, currentBoxResult.getFree());
+						preparedStatement.setDouble(15, currentBoxResult.getPercentageFull());
+						preparedStatement.setLong(16, currentBoxResult.getActiveCount());
+						preparedStatement.setString(17, currentBoxResult.getRepositorySpaceId());
+						preparedStatement.setLong(18,currentBoxResult.getDeletedCount());
+						preparedStatement.setLong(19,currentBoxResult.getInactiveCount());
+						preparedStatement.setLong(20, currentBoxResult.getOrphanedCount());
 
-							System.out.println(e.getMessage());
+						System.out.println(preparedStatement.toString());
+						preparedStatement.executeUpdate();
 
-						} finally {
+						System.out.println("Record is inserted and updated into database table LOCKSS_box_data_current for boxId" + boxId + " Repository Id: " + currentBoxResult.getRepositorySpaceId());
 
-							if (preparedStatement != null) {
-								preparedStatement.close();
-							}
+					} catch (SQLException e) {
 
-							if (dbConnection != null) {
-								dbConnection.close();
-							}
+						System.out.println(e.getMessage());
 
+					} finally {
+
+						if (preparedStatement != null) {
+							preparedStatement.close();
+						}
+
+						if (dbConnection != null) {
+							dbConnection.close();
 						}
 
 					}
 
-	
-	// if peers box data is collected from the LOCKSS Box, insert the results in the table Peers
+				}
 
-					if (peersBox != null) {
 
-						for (PeerWsResult currentPeer : peersBox) {
-						//DateFormat format = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
-						//format.setTimeZone(TimeZone.getTimeZone("Etc/UTC"));
-						//							System.out.println("Peer Id: "+currentPeer.getPeerId() + "<br>");
-						//							System.out.println("Last Poll: "+format.format(currentPeer.getLastPoll()) + "<br>");
-						//							System.out.println("Polls Called: "+currentPeer.getPollsCalled() + "<br>");
-						//							System.out.println("Nak Reason: "+currentPeer.getNakReason() + "<br>");
-						//						    System.out.println("Last invitation: "+ format.format(currentPeer.getLastInvitation())+ "<br>");
-						//							System.out.println("Message type: "+currentPeer.getMessageType() + "<br>");
-						//							System.out.println("Last vote: "+currentPeer.getLastVote() + "<br> <br>");
+				// if peers box data is collected from the LOCKSS Box, insert the results in the table Peers
+
+				if (peersBox != null) {
+
+					for (PeerWsResult currentPeer : peersBox) {
 
 						try {							
 							String insertTableSQL = "WITH upsert AS (UPDATE plnmonitor.peer " +
@@ -422,10 +453,10 @@ public class DaemonStatusWebService {
 							preparedStatement.setString(10, currentPeer.getMessageType());
 							preparedStatement.setLong(11, currentPeer.getPollsRejected());
 							preparedStatement.setLong(12, currentPeer.getVotesCast() );
-							
+
 							preparedStatement.setLong(13, boxId );
 							preparedStatement.setString(14, currentPeer.getPeerId() );
-							
+
 							preparedStatement.setLong(15, boxId);
 							preparedStatement.setLong(16, currentPeer.getLastPoll());
 							preparedStatement.setLong(17, currentPeer.getPollsCalled());
@@ -462,171 +493,126 @@ public class DaemonStatusWebService {
 						}
 					}
 
-						// if AUs box data is collected from the LOCKSS Box, insert the results in the table AU_current
-						
-						if (ausFromCurrentBox != null) {
-							for (AuWsResult currentAU :  ausFromCurrentBox) {
-								try {							
-									String insertTableSQL = "WITH upsert AS (UPDATE plnmonitor.au_current " +
-											"SET box = ?, " +
-											"name = ?, " +
-											"plugin_name = ?, " +
-											"tdb_year = ?, " +
-											"access_type = ?, " +
-											"content_size = ?, " +
-											"recent_poll_agreement = ?, " +
-											"creation_time = ?, " +
-											"au_lockss_id = ?, " +
-											"tdb_publisher = ?, " +
-											"volume = ?, " + 
-											"disk_usage = ?, " + 
-											"last_completed_crawl = ?, " + 
-											"last_completed_poll = ?, " + 
-											"last_crawl = ?, " + 
-											"last_poll = ?, " + 
-											"crawl_pool = ?, " + 
-											"crawl_proxy = ? ," + 
-											"crawl_window = ?, " + 
-											"last_crawl_result = ?, " + 
-											"last_poll_result = ?, " + 
-											"publishing_platform = ?, " + 
-											"repository_path = ?, " + 
-											"subscription_status = ?, " +
-											"substance_state = ?, " + 
-											"available_from_publisher = ? " + 
-											"WHERE box=? and au_lockss_id=? RETURNING *)" +
-											"INSERT INTO plnmonitor.au_current " +
-											"(box,name,plugin_name,tdb_year,access_type,content_size,recent_poll_agreement,creation_time,au_lockss_id,tdb_publisher,volume,disk_usage,last_completed_crawl,last_completed_poll,last_crawl,last_poll,crawl_pool,crawl_proxy,crawl_window,last_crawl_result,last_poll_result,publishing_platform,repository_path,subscription_status,substance_state,available_from_publisher)" + 
-											"SELECT " +
-											"?,?,?,?,? ,?,?,?,?,? ,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ? WHERE NOT EXISTS "+
-											"(SELECT * FROM upsert)";
+					// if AUs box data is collected from the LOCKSS Box, insert the results in the table AU_current
 
-									dbConnection = getDBConnection();
-									preparedStatement = dbConnection.prepareStatement(insertTableSQL);
-									preparedStatement.setLong(1, boxId);
-									preparedStatement.setString(2, currentAU.getName());
-									preparedStatement.setString(3, currentAU.getPluginName());
-									preparedStatement.setString(4, currentAU.getTdbYear());
-									preparedStatement.setString(5, currentAU.getAccessType());
-									preparedStatement.setLong(6, currentAU.getContentSize());
-									preparedStatement.setDouble(7, (currentAU.getRecentPollAgreement()!=null)?currentAU.getRecentPollAgreement():0);
-									preparedStatement.setLong(8, currentAU.getCreationTime());
-									preparedStatement.setString(9, currentAU.getAuId());
-									preparedStatement.setString(10, currentAU.getTdbPublisher());
-									preparedStatement.setString(11, currentAU.getVolume());
-									preparedStatement.setLong(12, (currentAU.getDiskUsage()!=null)?currentAU.getDiskUsage():0);
-									preparedStatement.setLong(13, (currentAU.getLastCompletedCrawl()!=null)?currentAU.getLastCompletedCrawl():0);
-									preparedStatement.setLong(14, (currentAU.getLastCompletedPoll()!=null)? currentAU.getLastCompletedPoll():0);
-									preparedStatement.setLong(15, (currentAU.getLastCrawl()!=null)? currentAU.getLastCrawl():0);
-									preparedStatement.setLong(16, (currentAU.getLastPoll()!= null)?currentAU.getLastPoll():0);
-									preparedStatement.setString(17, currentAU.getCrawlPool());
-									preparedStatement.setString(18, (currentAU.getCrawlProxy()!=null)?currentAU.getCrawlProxy():"");
-									preparedStatement.setString(19, (currentAU.getCrawlWindow()!=null)?currentAU.getCrawlWindow():"");
-									preparedStatement.setString(20, currentAU.getLastCrawlResult());
-									preparedStatement.setString(21, currentAU.getLastPollResult());
-									preparedStatement.setString(22, currentAU.getPublishingPlatform());
-									preparedStatement.setString(23, (currentAU.getRepositoryPath()!=null)?currentAU.getRepositoryPath():"");
-									preparedStatement.setString(24, (currentAU.getSubscriptionStatus()!=null)?currentAU.getSubscriptionStatus(): "");
-									preparedStatement.setString(25, currentAU.getSubstanceState());
-									preparedStatement.setBoolean(26, currentAU.getAvailableFromPublisher());
-									
-									preparedStatement.setLong(27, boxId);
-									preparedStatement.setString(28, currentAU.getAuId());
-									
-									preparedStatement.setLong(29, boxId);
-									preparedStatement.setString(30, currentAU.getName());
-									preparedStatement.setString(31, currentAU.getPluginName());
-									preparedStatement.setString(32, currentAU.getTdbYear());
-									preparedStatement.setString(33, currentAU.getAccessType());
-									preparedStatement.setLong(34, currentAU.getContentSize());
-									preparedStatement.setDouble(35, (currentAU.getRecentPollAgreement()!=null)?currentAU.getRecentPollAgreement():0);
-									preparedStatement.setLong(36, currentAU.getCreationTime());
-									preparedStatement.setString(37, currentAU.getAuId());
-									preparedStatement.setString(38, currentAU.getTdbPublisher());
-									preparedStatement.setString(39, currentAU.getVolume());
-									preparedStatement.setLong(40, currentAU.getDiskUsage());
-									preparedStatement.setLong(41, currentAU.getLastCompletedCrawl());
-									preparedStatement.setLong(42, (currentAU.getLastCompletedPoll()!=null)? currentAU.getLastCompletedPoll():0);
-									preparedStatement.setLong(43, currentAU.getLastCrawl());
-									preparedStatement.setLong(44, (currentAU.getLastPoll()!= null)?currentAU.getLastPoll():0);
-									preparedStatement.setString(45, currentAU.getCrawlPool());
-									preparedStatement.setString(46, (currentAU.getCrawlProxy()!=null)?currentAU.getCrawlProxy():"");
-									preparedStatement.setString(47, (currentAU.getCrawlWindow()!=null)?currentAU.getCrawlWindow():"");
-									preparedStatement.setString(48, currentAU.getLastCrawlResult());
-									preparedStatement.setString(49, currentAU.getLastPollResult());
-									preparedStatement.setString(50, currentAU.getPublishingPlatform());
-									preparedStatement.setString(51, (currentAU.getRepositoryPath()!=null)?currentAU.getRepositoryPath():"");
-									preparedStatement.setString(52, (currentAU.getSubscriptionStatus()!=null)?currentAU.getSubscriptionStatus(): "");
-									preparedStatement.setString(53, currentAU.getSubstanceState());
-									preparedStatement.setBoolean(54, currentAU.getAvailableFromPublisher());
-									
-									preparedStatement.executeUpdate();
+					if (ausFromCurrentBox != null) {
+						for (AuWsResult currentAU :  ausFromCurrentBox) {
+							try {							
+								String insertTableSQL = "WITH upsert AS (UPDATE plnmonitor.au_current " +
+										"SET box = ?, " +
+										"name = ?, " +
+										"plugin_name = ?, " +
+										"tdb_year = ?, " +
+										"access_type = ?, " +
+										"content_size = ?, " +
+										"recent_poll_agreement = ?, " +
+										"creation_time = ?, " +
+										"au_lockss_id = ?, " +
+										"tdb_publisher = ?, " +
+										"volume = ?, " + 
+										"disk_usage = ?, " + 
+										"last_completed_crawl = ?, " + 
+										"last_completed_poll = ?, " + 
+										"last_crawl = ?, " + 
+										"last_poll = ?, " + 
+										"crawl_pool = ?, " + 
+										"crawl_proxy = ? ," + 
+										"crawl_window = ?, " + 
+										"last_crawl_result = ?, " + 
+										"last_poll_result = ?, " + 
+										"publishing_platform = ?, " + 
+										"repository_path = ?, " + 
+										"subscription_status = ?, " +
+										"substance_state = ?, " + 
+										"available_from_publisher = ? " + 
+										"WHERE box=? and au_lockss_id=? RETURNING *)" +
+										"INSERT INTO plnmonitor.au_current " +
+										"(box,name,plugin_name,tdb_year,access_type,content_size,recent_poll_agreement,creation_time,au_lockss_id,tdb_publisher,volume,disk_usage,last_completed_crawl,last_completed_poll,last_crawl,last_poll,crawl_pool,crawl_proxy,crawl_window,last_crawl_result,last_poll_result,publishing_platform,repository_path,subscription_status,substance_state,available_from_publisher)" + 
+										"SELECT " +
+										"?,?,?,?,? ,?,?,?,?,? ,?,?,?,?,?, ?,?,?,?,?, ?,?,?,?,?, ? WHERE NOT EXISTS "+
+										"(SELECT * FROM upsert)";
 
-									System.out.println("Record "+ currentAU.getName() + "is inserted into AU_current table!");
+								dbConnection = getDBConnection();
+								preparedStatement = dbConnection.prepareStatement(insertTableSQL);
+								preparedStatement.setLong(1, boxId);
+								preparedStatement.setString(2, currentAU.getName());
+								preparedStatement.setString(3, currentAU.getPluginName());
+								preparedStatement.setString(4, currentAU.getTdbYear());
+								preparedStatement.setString(5, currentAU.getAccessType());
+								preparedStatement.setLong(6, currentAU.getContentSize());
+								preparedStatement.setDouble(7, (currentAU.getRecentPollAgreement()!=null)?currentAU.getRecentPollAgreement():0);
+								preparedStatement.setLong(8, currentAU.getCreationTime());
+								preparedStatement.setString(9, currentAU.getAuId());
+								preparedStatement.setString(10, currentAU.getTdbPublisher());
+								preparedStatement.setString(11, currentAU.getVolume());
+								preparedStatement.setLong(12, (currentAU.getDiskUsage()!=null)?currentAU.getDiskUsage():0);
+								preparedStatement.setLong(13, (currentAU.getLastCompletedCrawl()!=null)?currentAU.getLastCompletedCrawl():0);
+								preparedStatement.setLong(14, (currentAU.getLastCompletedPoll()!=null)? currentAU.getLastCompletedPoll():0);
+								preparedStatement.setLong(15, (currentAU.getLastCrawl()!=null)? currentAU.getLastCrawl():0);
+								preparedStatement.setLong(16, (currentAU.getLastPoll()!= null)?currentAU.getLastPoll():0);
+								preparedStatement.setString(17, currentAU.getCrawlPool());
+								preparedStatement.setString(18, (currentAU.getCrawlProxy()!=null)?currentAU.getCrawlProxy():"");
+								preparedStatement.setString(19, (currentAU.getCrawlWindow()!=null)?currentAU.getCrawlWindow():"");
+								preparedStatement.setString(20, currentAU.getLastCrawlResult());
+								preparedStatement.setString(21, currentAU.getLastPollResult());
+								preparedStatement.setString(22, currentAU.getPublishingPlatform());
+								preparedStatement.setString(23, (currentAU.getRepositoryPath()!=null)?currentAU.getRepositoryPath():"");
+								preparedStatement.setString(24, (currentAU.getSubscriptionStatus()!=null)?currentAU.getSubscriptionStatus(): "");
+								preparedStatement.setString(25, currentAU.getSubstanceState());
+								preparedStatement.setBoolean(26, currentAU.getAvailableFromPublisher());
 
-								} catch (SQLException e) {
+								preparedStatement.setLong(27, boxId);
+								preparedStatement.setString(28, currentAU.getAuId());
 
-									System.out.println(e.getMessage());
+								preparedStatement.setLong(29, boxId);
+								preparedStatement.setString(30, currentAU.getName());
+								preparedStatement.setString(31, currentAU.getPluginName());
+								preparedStatement.setString(32, currentAU.getTdbYear());
+								preparedStatement.setString(33, currentAU.getAccessType());
+								preparedStatement.setLong(34, currentAU.getContentSize());
+								preparedStatement.setDouble(35, (currentAU.getRecentPollAgreement()!=null)?currentAU.getRecentPollAgreement():0);
+								preparedStatement.setLong(36, currentAU.getCreationTime());
+								preparedStatement.setString(37, currentAU.getAuId());
+								preparedStatement.setString(38, currentAU.getTdbPublisher());
+								preparedStatement.setString(39, currentAU.getVolume());
+								preparedStatement.setLong(40, currentAU.getDiskUsage());
+								preparedStatement.setLong(41, currentAU.getLastCompletedCrawl());
+								preparedStatement.setLong(42, (currentAU.getLastCompletedPoll()!=null)? currentAU.getLastCompletedPoll():0);
+								preparedStatement.setLong(43, currentAU.getLastCrawl());
+								preparedStatement.setLong(44, (currentAU.getLastPoll()!= null)?currentAU.getLastPoll():0);
+								preparedStatement.setString(45, currentAU.getCrawlPool());
+								preparedStatement.setString(46, (currentAU.getCrawlProxy()!=null)?currentAU.getCrawlProxy():"");
+								preparedStatement.setString(47, (currentAU.getCrawlWindow()!=null)?currentAU.getCrawlWindow():"");
+								preparedStatement.setString(48, currentAU.getLastCrawlResult());
+								preparedStatement.setString(49, currentAU.getLastPollResult());
+								preparedStatement.setString(50, currentAU.getPublishingPlatform());
+								preparedStatement.setString(51, (currentAU.getRepositoryPath()!=null)?currentAU.getRepositoryPath():"");
+								preparedStatement.setString(52, (currentAU.getSubscriptionStatus()!=null)?currentAU.getSubscriptionStatus(): "");
+								preparedStatement.setString(53, currentAU.getSubstanceState());
+								preparedStatement.setBoolean(54, currentAU.getAvailableFromPublisher());
 
-								} finally {
+								preparedStatement.executeUpdate();
 
-									if (preparedStatement != null) {
-										preparedStatement.close();
-									}
+								System.out.println("Record "+ currentAU.getName() + "is inserted into AU_current table!");
 
-									if (dbConnection != null) {
-										dbConnection.close();
-									}
+							} catch (SQLException e) {
 
+								System.out.println(e.getMessage());
+
+							} finally {
+
+								if (preparedStatement != null) {
+									preparedStatement.close();
 								}
+
+								if (dbConnection != null) {
+									dbConnection.close();
+								}
+
 							}
 						}
-						
-					// Archival Units 
+					}
 
-					// print column names
-					//						for (int i=0; i< Categories.length; i++) {
-					//							System.out.println("<th class=\"tg-031e\">"+ Categories[i]+"</th>");
-					//						}
-					//						System.out.println("</tr>");
-
-					// print values for each AU
-					/*						for (AuWsResult auResult : auResults.getValue()) {
-							System.out.println("<td class=\"tg-031e\">"+auResult.getName()+"</td>");
-							//				System.out.println("<td class=\"tg-031e\">"+auResult.getVolume()+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getPluginName()+"</td>");
-							System.out.println("<td class=\"tg-031e\">"+auResult.getTdbYear()+"</td>");
-							System.out.println("<td class=\"tg-031e\">"+auResult.getAccessType()+"</td>");
-							System.out.println("<td class=\"tg-031e\">"+FileUtils.byteCountToDisplaySize(auResult.getContentSize())+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getDiskUsage()+"</td>");
-							String pollAgreementStr;
-							if (auResult.getRecentPollAgreement() ==null) {
-								pollAgreementStr="100 %";
-							}
-							else {
-								pollAgreementStr= String.format("%.2f%%", auResult.getRecentPollAgreement()*100);
-							}
-							//Double pollAgreement=new Double(auResult.getRecentPollAgreement());
-							//String pollAgreementStr= String.format("%.2f", pollAgreement*100);
-							//System.out.println(pollAgreementStr);
-							System.out.println("<td class=\""+ (pollAgreementStr.equals("100 %")? "greened" :"redded") +"\">"+ pollAgreementStr +"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getPublishingPlatform()+"</td>");
-							System.out.println("<td class=\"tg-031e\">"+auResult.getAvailableFromPublisher().toString()+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getSubstanceState()+"</td>");
-							Date date = new Date(auResult.getCreationTime());
-							DateFormat format = new SimpleDateFormat("dd/MM/yyyy HH:mm:ss");
-							format.setTimeZone(TimeZone.getTimeZone("Etc/UTC"));
-							System.out.println("<td class=\"tg-031e\">"+format.format(date)+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getCrawlProxy()+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getCrawlWindow()+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getCrawlPool()+"</td>");
-							date = new Date(auResult.getLastCompletedCrawl());
-							format.setTimeZone(TimeZone.getTimeZone("Etc/UTC"));
-							System.out.println("<td class=\"tg-031e\">"+format.format(date)+"</td>");
-							System.out.println("<td class=\"tg-031e\">"+auResult.getLastPollResult()+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getAuConfiguration()+"</td>");
-							//System.out.println("<td class=\"tg-031e\">"+auResult.getPeerAgreements().toString()+"</td>");
-						}*/
 
 				}
 
@@ -643,6 +629,11 @@ public class DaemonStatusWebService {
 
 
 
+	/**
+	 * Gets the DB connection.
+	 *
+	 * @return the DB connection
+	 */
 	private static Connection getDBConnection() {
 
 		Connection dbConnection = null;
@@ -673,6 +664,11 @@ public class DaemonStatusWebService {
 
 	}
 
+	/**
+	 * Gets the current time stamp.
+	 *
+	 * @return the current time stamp
+	 */
 	private static java.sql.Timestamp getCurrentTimeStamp() {
 
 		java.util.Date today = new java.util.Date();
@@ -680,6 +676,7 @@ public class DaemonStatusWebService {
 
 	}
 
+	//TODO: Currently hardcoded username and password for debug user - info needs to come from DB
 	/**
 	 * Sets the authenticator that will be used by the networking code when the
 	 * HTTP server asks for authentication.
@@ -693,33 +690,37 @@ public class DaemonStatusWebService {
 		});
 	}
 
+	//TODO: Unsuccessful tentative to use form base authentication when SSL is enabled on the box
 	/**
 	 * Sets the authenticator that will be used by the networking code when the
 	 * HTTP server asks for authentication.
+	 *
+	 * @param server the server
+	 * @throws Exception the exception
 	 */
 	private void formAuthenticate(String server ) throws Exception{
-		  CredentialsProvider credsProvider = new BasicCredentialsProvider();
-	        credsProvider.setCredentials(
-	                new AuthScope(server, 8081),
-	                new UsernamePasswordCredentials("debug", "debuglockss"));
-	        CloseableHttpClient httpclient = HttpClients.custom()
-	                .setDefaultCredentialsProvider(credsProvider)
-	                .build();
-	        try {
-	            HttpGet httpget = new HttpGet("https://"+ server +":8081/Home");
+		CredentialsProvider credsProvider = new BasicCredentialsProvider();
+		credsProvider.setCredentials(
+				new AuthScope(server, 8081),
+				new UsernamePasswordCredentials("debug", "debuglockss"));
+		CloseableHttpClient httpclient = HttpClients.custom()
+				.setDefaultCredentialsProvider(credsProvider)
+				.build();
+		try {
+			HttpGet httpget = new HttpGet("https://"+ server +":8081/Home");
 
-	            System.out.println("Executing request " + httpget.getRequestLine());
-	            CloseableHttpResponse response = httpclient.execute(httpget);
-	            try {
-	                System.out.println("----------------------------------------");
-	                System.out.println(response.getStatusLine());
-	                System.out.println(EntityUtils.toString(response.getEntity()));
-	            } finally {
-	                response.close();
-	            }
-	        } finally {
-	            httpclient.close();
-	        }
+			System.out.println("Executing request " + httpget.getRequestLine());
+			CloseableHttpResponse response = httpclient.execute(httpget);
+			try {
+				System.out.println("----------------------------------------");
+				System.out.println(response.getStatusLine());
+				System.out.println(EntityUtils.toString(response.getEntity()));
+			} finally {
+				response.close();
+			}
+		} finally {
+			httpclient.close();
+		}
 	}
-	
+
 }

@@ -10,12 +10,22 @@ import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
 
-import java.util.ArrayList;
-import java.util.List;
 
+/**
+ * The Class FormBasedAuthentification.
+ * 
+ * Unsuccessful attempt to use form-based authentification for boxes with SSL enabled
+ * form-based authentication
+ */
 public class FormBasedAuthentification {
 
-		    public static void main(String[] agrs) throws Exception{
+		    /**
+    		 * The main method.
+    		 *
+    		 * @param agrs the arguments
+    		 * @throws Exception the exception
+    		 */
+    		public static void main(String[] agrs) throws Exception{
 		        String host = "164.15.1.87";
 		        int port = 8081;
 		        String protocol = "https";

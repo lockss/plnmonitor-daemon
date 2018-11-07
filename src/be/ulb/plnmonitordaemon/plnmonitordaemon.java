@@ -1,12 +1,28 @@
 package be.ulb.plnmonitordaemon;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * The Class plnmonitordaemon.
+ * 
+ * Main class of the daemon
+ * Starts by method loadPLNConfiguration to get IPadresses of all boxes in the LOCKSS network
+ * Then collects info from all boxes with method loadDaemonStatus and stores status in the DB
+ * 
+ * Originally intended to be a Java Thread then used as a cron task executed once a day at 08:30 am
+ * 
+ * /etc/cron.d/plnmonitor 
+ *  30 8  *  *  * root java -jar /opt/plnmonitor-daemon.jar  
+*/
 public class plnmonitordaemon {
 
+	/**
+	 * The main method.
+	 *
+	 * @param args the arguments
+	 */
 	public static void main(String[] args) {
 		new WorkerThread().start();
 
@@ -32,10 +48,9 @@ class WorkerThread extends Thread {
 	}
 
 	public void run() {
-		int count = 0;
 		DaemonStatusWebService dsws = new DaemonStatusWebService();
 		//while (true) {
-			System.out.println("Updating PLN status " + count++);
+			System.out.println("Updating PLN status " );
 			try {
 				HashMap<Integer, String> configFiles = dsws.getPLNConfigurationFiles();
 				for (Map.Entry<Integer, String> entry : configFiles.entrySet()) {
@@ -47,13 +62,13 @@ class WorkerThread extends Thread {
 					for (String boxIpAddress : boxIpAddresses) {
 						System.out.println("Loading configuration of: " + boxIpAddress);
 						dsws.loadDaemonStatus(plnID, boxIpAddress);
-
+						
 					}
 				}
-	//			sleep(86400000);
+		//sleep(86400000);
 			} catch (Exception e) {
 				e.printStackTrace();
 			}
-	//	}
+		//}
 	}
 }
