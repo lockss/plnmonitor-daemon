@@ -1,4 +1,4 @@
-package be.ulb.plnmonitordaemon;
+package org.lockss.plnmonitordaemon;
 
 import java.util.HashMap;
 import java.util.List;
@@ -50,7 +50,7 @@ class WorkerThread extends Thread {
 	public void run() {
 		DaemonStatusWebService dsws = new DaemonStatusWebService();
 		//while (true) {
-			System.out.println("Updating PLN status " );
+			System.out.println("Updating LOCKSS network status " );
 			try {
 				HashMap<Integer, String> configFiles = dsws.getPLNConfigurationFiles();
 				for (Map.Entry<Integer, String> entry : configFiles.entrySet()) {

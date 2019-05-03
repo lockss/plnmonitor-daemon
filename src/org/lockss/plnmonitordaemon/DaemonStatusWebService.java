@@ -1,5 +1,5 @@
 
-package be.ulb.plnmonitordaemon;
+package org.lockss.plnmonitordaemon;
 
 import java.net.Authenticator;
 import java.net.PasswordAuthentication;
@@ -70,7 +70,7 @@ public class DaemonStatusWebService {
 	private static final String DB_DRIVER = "org.postgresql.Driver";
 	
 	/** The Constant DB_CONNECTION. Hardcoded parameter of plnmonitor DB connection to localhost*/
-	private static final String DB_CONNECTION = "jdbc:postgresql://127.0.0.1:5432/plnmonitor";
+	private static final String DB_CONNECTION = "jdbc:postgresql://plnmonitordb:5432/plnmonitor";
 	
 	/** The Constant DB_USER. Hardcoded plnmonitor db username*/
 	private static final String DB_USER = "plnmonitor";

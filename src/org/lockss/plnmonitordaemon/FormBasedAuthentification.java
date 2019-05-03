@@ -1,4 +1,4 @@
-package be.ulb.plnmonitordaemon;
+package org.lockss.plnmonitordaemon;
 
 import org.apache.http.auth.AuthScope;
 import org.apache.http.auth.UsernamePasswordCredentials;

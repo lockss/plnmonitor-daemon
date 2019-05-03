@@ -1,1 +1,11 @@
-be.ulb.plnmonitordaemon
+org.lockss.plnmonitor
+org.lockss.plnmonitor.dao
+org.lockss.plnmonitor.datacontroller
+org.lockss.plnmonitor.object
+org.lockss.plnmonitor.rdbms
+org.lockss.plnmonitor.webpages
+org.lockss.plnmonitor.webpages.AUstatus
+org.lockss.plnmonitor.webpages.BoxStatus
+org.lockss.plnmonitor.webpages.Configuration
+org.lockss.plnmonitor.webpages.Members
+org.lockss.plnmonitor.webpages.Network
