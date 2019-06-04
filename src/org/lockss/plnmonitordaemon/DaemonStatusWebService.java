@@ -41,7 +41,7 @@ import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
-
+import org.mindrot.jbcrypt.BCrypt;
 
 /**
  * The Class DaemonStatusWebService.
@@ -65,31 +65,12 @@ import org.w3c.dom.NodeList;
  * @version 0.7
  */
 public class DaemonStatusWebService {
-	
-	/** The Constant DB_DRIVER. Hardcoded parameter of postgresql driver */
-	private static final String DB_DRIVER = "org.postgresql.Driver";
-	
-	/** The Constant DB_CONNECTION. Hardcoded parameter of plnmonitor DB connection to localhost*/
-	private static final String DB_CONNECTION = "jdbc:postgresql://plnmonitordb:5432/plnmonitor";
-	
-	/** The Constant DB_USER. Hardcoded plnmonitor db username*/
-	private static final String DB_USER = "plnmonitor";
-	
-	/** The Constant DB_PASSWORD. Hardcoded plnmonitor db password*/
-	private static final String DB_PASSWORD = "plnmonitor";
 
-	//TODO: use username from the database for specific box instead of hardcoded value 
-	/** The Constant USER_NAME. Hardcoded daemon UI user name with debug info access only (read) for all lockss boxes in the network (8081)*/
-	private static final String USER_NAME = "debug";
 
-	//TODO: use password from the database for specific box instead of hardcoded value
-	/** The Constant PASSWORD. Hardcoded daemon UI debug userpassword with debug info access only (read) for all lockss boxes in the network (8081)*/
-	private static final String PASSWORD = "debuglockss";
-	
 	//TODO: use protocol from the database for specific box
 	/** The Constant prefixDSS. Http prefix for Daemon Status Web Service URL*/
 	private static final String prefixDSS = "http://";
-	
+
 	//TODO: use protocol from the database for specific box
 	/** The Constant prefixSDSS. Https prefix for Daemon Status Web Service URL*/
 	private static final String prefixSDSS = "https://";
@@ -97,13 +78,13 @@ public class DaemonStatusWebService {
 	//TODO: use DSS parameters from the database for specific box (no hardcoded 8081 port but instead specific to box)
 	/** The Constant postfixDSS. Postfix for Daemon Status Web Service URL */
 	private static final String postfixDSS = ":8081/ws/DaemonStatusService?wsdl";
-	
+
 	/** The Constant TARGET_NAMESPACE. Daemon Status Service namespace  */
 	private static final String TARGET_NAMESPACE = "http://status.ws.lockss.org/";
-	
+
 	/** The Constant SERVICE_NAME. Daemon Status Service service name*/
 	private static final String SERVICE_NAME = "DaemonStatusServiceImplService";
-	
+
 	/** The Constant QUERY. Daemon Status Service query to get all available info in specific order*/
 	private static final String QUERY = "select auId, name, volume, pluginName, tdbYear, accessType, contentSize, diskUsage, recentPollAgreement, tdbPublisher, availableFromPublisher, substanceState, creationTime, crawlProxy, crawlWindow, crawlPool, lastCompletedCrawl, lastCrawl, lastCrawlResult, lastCompletedPoll, lastPollResult, currentlyCrawling, currentlyPolling, subscriptionStatus, auConfiguration, newContentCrawlUrls, urlStems, isBulkContent, peerAgreements";
 
@@ -111,7 +92,25 @@ public class DaemonStatusWebService {
 	private static final String IPV4_PATTERN = 
 			"(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)";
 
- 
+	private String dbConnectionURL;
+	private String dbUser;
+	private String dbPassword;
+	private String dbDriver;
+
+	private String username;
+	private String password;
+
+	/**
+	 * DaemonStatusWebService constructor
+	 * @param dbconnection database connection url
+	 */
+	public DaemonStatusWebService(String dbConnectionURL, String dbUser, String dbPassword, String dbDriver) {
+		this.dbConnectionURL = dbConnectionURL;
+		this.dbUser = dbUser;
+		this.dbPassword = dbPassword;
+		this.dbDriver = dbDriver;
+	}
+
 	/**
 	 * Gets URLs of the lockss.xml configuration file for each LOCKSS network available in the database 
 	 * 
@@ -134,7 +133,10 @@ public class DaemonStatusWebService {
 				configurationFiles.put(rs.getInt("id"),rs.getString("config_url"));
 			}
 
-		} catch (SQLException e) {
+		} catch (Exception e) {
+			System.out.println("Please check that the database is running and/or plnmonitor has been properly configured:");
+			System.out.println("$ java -jar plnmonitor-daemon.jar config");
+
 			System.out.println(e.getMessage());
 		} finally {
 			if (dbConnection != null) {
@@ -157,7 +159,53 @@ public class DaemonStatusWebService {
 	 * @return plnMembers : the list of box IP addresses in the network 
 	 */
 	// put all pln members IP address in plnMembers
-	public List<String> loadPLNConfiguration(Integer plnID, String configUrl){
+	public List<String> loadPLNConfiguration(Integer plnID, String name, String configUrl) throws SQLException {
+		Connection dbConnection = null;
+		PreparedStatement preparedStatement=null;
+
+		try {
+
+			String insertTableSQL = 
+					"WITH upsert AS " +
+							"(UPDATE plnmonitor.pln " +
+							"SET name = ? " +
+							"WHERE config_url=? and id=? RETURNING *), " +
+
+					"inserted AS ("+
+					"INSERT INTO plnmonitor.pln " +
+					"(name,config_url,id) "+
+					"SELECT ?,?,? WHERE NOT EXISTS "+
+					"(SELECT * FROM upsert) "+
+					"RETURNING *) "+
+					"SELECT * " +
+					"FROM upsert " +
+					"union all " +
+					"SELECT * " +
+					"FROM inserted";
+
+			dbConnection = getDBConnection();
+			preparedStatement = dbConnection.prepareStatement(insertTableSQL, Statement.KEEP_CURRENT_RESULT);
+			preparedStatement.setString(1, name);
+			preparedStatement.setString(2, configUrl);
+			preparedStatement.setInt(3, plnID);
+			preparedStatement.setString(4, name);
+			preparedStatement.setString(5, configUrl);
+			preparedStatement.setInt(6, plnID);
+
+			ResultSet rs=preparedStatement.executeQuery();
+
+		} catch (SQLException e) {
+			System.out.println(e.getMessage());
+
+		} finally {
+			if (preparedStatement != null) {
+				preparedStatement.close();
+			}
+			if (dbConnection != null) {
+				dbConnection.close();
+			}
+		}	
+
 		List<String> plnMembers=new  ArrayList<String>();
 
 		DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
@@ -191,9 +239,313 @@ public class DaemonStatusWebService {
 		}
 		catch(Exception e){
 			System.out.println(e.toString());
-
 		}
 		return (plnMembers);
+	}
+
+	/**
+	 * Get Box Info FROM database
+	 *
+	 * Returns a HashMap with information extracted from the postgres database for a given LOCKSS box :
+	 * - credentials for LOCKSS box UI access (username, password for debug user)
+	 * - geographical coordinates of the LOCKSS box
+	 * - country
+	 * - short name of the LOCKSS box
+	 *  
+	 * @param plnID the pln ID in the database
+	 * @param boxIpAddress the IP address 
+	 * @return plnMembers : the list of box IP addresses in the network 
+	 */
+
+	public HashMap<String, String> getBoxInfo(int plnID, String boxIpAddress, String username, String password) throws SQLException {
+		// TODO: check plnID
+
+		HashMap<String, String> boxInfo = null;
+		Connection dbConnection = null;
+		PreparedStatement preparedStatement=null;
+		Service service = null;
+
+		PlatformConfigurationWsResult boxConfiguration = null;
+		Integer boxId=null;
+
+		try {
+			// Call the service and get the results of the query.
+			// Store AUs results for each server in a Hashmap (server name, list of Aus)
+			this.authenticate(username, password); //basic authentication (inline)
+
+			String boxHostname = boxIpAddress;
+
+			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
+
+			try {
+
+				service = Service.create(new URL(serviceAddress), new QName(
+						TARGET_NAMESPACE, SERVICE_NAME));
+
+			}
+
+			catch (WebServiceException e) {
+				System.out.println("Can't connect to the LOCKSS box " + boxHostname);
+				System.out.println("*** Please check the LOCKSS box firewall settings and LOCKSS UI access control.");
+			}
+
+			try {
+				if (service != null) {  //if service available, get all data from the LOCKSS box
+					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					boxConfiguration = dss.getPlatformConfiguration();
+				}
+			}
+			catch (WebServiceException e) {
+				System.out.println(e.toString());
+			}
+
+			// if data from platform configuration is available, update the LOCKSS box table accordingly in the database
+			if (boxConfiguration!=null) {
+				//update LOCKSS box config in the LOCKSS_box database
+				//upsert: if box date identified by (ipaddress+pln id) is already in the database, update entry otherwise insert 
+				//upsert is not available in Postgres 9.4
+				try {
+
+					String queryTableSQL = "SELECT * FROM plnmonitor.lockss_box AS box INNER JOIN plnmonitor.lockss_box_info AS info "
+							+ "ON box.id = info.box WHERE box.ipaddress = ? AND box.pln = ?"; // WHERE pln=" + plnID;
+
+
+					dbConnection = getDBConnection();
+					preparedStatement = dbConnection.prepareStatement(queryTableSQL, Statement.KEEP_CURRENT_RESULT);
+
+					preparedStatement.setString(1, boxIpAddress);
+					preparedStatement.setInt(2, plnID);
+
+					ResultSet rs=preparedStatement.executeQuery();
+
+					if (rs.next()) {
+						boxInfo = new HashMap<String,String>();
+						boxInfo.put("username", rs.getString("username"));
+						boxInfo.put("password", rs.getString("password"));
+						boxInfo.put("latitude", Double.toString(rs.getDouble("latitude")));
+						boxInfo.put("longitude", Double.toString(rs.getDouble("longitude")));
+						boxInfo.put("country", rs.getString("country"));
+						boxInfo.put("boxname", rs.getString("name"));
+					}
+
+
+				} catch (SQLException e)  {
+					System.out.println(e.getMessage());
+
+				} finally {
+					if (preparedStatement != null) {
+						preparedStatement.close();
+					}
+					if (dbConnection != null) {
+						dbConnection.close();
+					}
+				}
+			}
+		}
+		catch (Exception e) {
+			System.out.println(e.getMessage());
+		}
+		return boxInfo;
+	}
+
+	/**
+	 * Set Box Info IN database 
+	 *
+	 * Sets information provided in command line by the user in the postgres database for a given LOCKSS box :
+	 * - credentials for LOCKSS box UI access (username, password for debug user)
+	 * - geographical coordinates of the LOCKSS box
+	 * - country
+	 * - short name of the LOCKSS box
+	 *  
+	 * @param plnID the pln ID in the database
+	 * @param boxIpAddress the IP address 
+	 * @param username username for the debug user in the LOCKSS box UI
+	 * @param password password for the debug user in the LOCKSS box UI 
+	 * @param latitude geographical coordinate for the given LOCKSS box
+	 * @param longitude geographical coordinate for the given LOCKSS box
+	 * @param country country in which the given LOCKSS box is located
+	 * @param boxname short name given to the LOCKSS box
+	 * 
+	 * @throws SQLException the SQL exception
+	 */
+
+	public void setBoxInfo(Integer plnID, String boxIpAddress, String username, String password, String latitude, String longitude, String country, String boxname) throws SQLException{
+		Connection dbConnection = null;
+		PreparedStatement preparedStatement=null;
+		Service service = null;
+
+		PlatformConfigurationWsResult boxConfiguration = null;
+		Integer boxId=null;
+
+		try {
+			// Call the service and get the results of the query.
+			// Store AUs results for each server in a Hashmap (server name, list of Aus)
+			this.authenticate(username, password); //basic authentication (inline)
+
+			String boxHostname = boxIpAddress;
+
+			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
+
+			try {
+
+				service = Service.create(new URL(serviceAddress), new QName(TARGET_NAMESPACE, SERVICE_NAME));
+			}
+
+			catch (WebServiceException e) {
+				System.out.println(e.toString());
+				System.out.println("Can't connect to the LOCKSS box " + boxHostname + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control");
+			}
+
+			try {
+				if (service != null) {  //if service available, get all data from the LOCKSS box
+					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					boxConfiguration = dss.getPlatformConfiguration();
+				}
+			}
+			catch (WebServiceException e) {
+				System.out.println(e.toString());
+			}
+
+			// if data from platform configuration is available, update the LOCKSS box table accordingly in the database
+			if (boxConfiguration!=null){
+				//update LOCKSS box config in the LOCKSS_box database
+				//upsert: if box date identified by (ipaddress+pln id) is already in the database, update entry otherwise insert 
+				//upsert is not available in Postgres 9.4
+				try {
+
+					String insertTableSQL = 
+							"WITH upsert AS " +
+									"(UPDATE plnmonitor.lockss_box " +
+									"SET uiport = ?, " +
+									"groups = ?, " +
+									"v3identity = ?, " +
+									"uptime = ?, " +
+									"admin_email = ?, " +
+									"disks = ?, " +
+									"\"current_time\" = ?, " +
+									"daemon_full_version = ?, " +
+									"java_version = ?, " +
+									"platform = ? " +
+									"WHERE ipaddress=? and pln=? RETURNING *), " +
+
+							"inserted AS ("+
+							"INSERT INTO plnmonitor.lockss_box " +
+							"(ipaddress,uiport,pln,groups,v3identity,uptime,admin_email,disks,\"current_time\", daemon_full_version, java_version, platform) "+
+							"SELECT ?,?,?,?,?,?,?,?,?,?,?,? WHERE NOT EXISTS "+
+							"(SELECT * FROM upsert) "+
+							"RETURNING *) "+
+							"SELECT * " +
+							"FROM upsert " +
+							"union all " +
+							"SELECT * " +
+							"FROM inserted";
+
+					dbConnection = getDBConnection();
+					preparedStatement = dbConnection.prepareStatement(insertTableSQL, Statement.KEEP_CURRENT_RESULT);
+					preparedStatement.setString(1, "8081");
+					preparedStatement.setString(2, boxConfiguration.getGroups().get(0).replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(3, boxConfiguration.getV3Identity().replaceAll("\\[|\\]", ""));
+					preparedStatement.setLong(4, boxConfiguration.getUptime());
+					preparedStatement.setString(5, boxConfiguration.getAdminEmail().replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(6, boxConfiguration.getDisks().get(0).replaceAll("\\[|\\]", ""));
+					preparedStatement.setLong(7, boxConfiguration.getCurrentTime());
+					preparedStatement.setString(8, boxConfiguration.getDaemonVersion().toString().replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(9, boxConfiguration.getJavaVersion().toString().replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(10, boxConfiguration.getPlatform().toString().replaceAll("\\[|\\]", ""));
+
+					preparedStatement.setString(11, boxIpAddress);
+					preparedStatement.setInt(12, plnID);
+
+					preparedStatement.setString(13, boxIpAddress);
+					preparedStatement.setString(14, "8081");
+					preparedStatement.setInt(15, plnID);
+					preparedStatement.setString(16, boxConfiguration.getGroups().get(0).replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(17, boxConfiguration.getV3Identity().replaceAll("\\[|\\]", ""));
+					preparedStatement.setLong(18, boxConfiguration.getUptime());
+					preparedStatement.setString(19, boxConfiguration.getAdminEmail().replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(20, boxConfiguration.getDisks().get(0).replaceAll("\\[|\\]", ""));
+					preparedStatement.setLong(21, boxConfiguration.getCurrentTime());
+					preparedStatement.setString(22, boxConfiguration.getDaemonVersion().toString().replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(23, boxConfiguration.getJavaVersion().toString().replaceAll("\\[|\\]", ""));
+					preparedStatement.setString(24, boxConfiguration.getPlatform().toString().replaceAll("\\[|\\]", ""));
+					ResultSet rs=preparedStatement.executeQuery();
+					if (rs.next()) {
+						boxId = rs.getInt("id");
+					}
+					System.out.println("Entry for pln: "+ plnID + " with IP address "+boxIpAddress + " ----- " + boxConfiguration.getIpAddress() + "V3 identity:" +  boxConfiguration.getV3Identity() + " is inserted/updated into LOCKSS_BOX table at position "+ boxId);
+
+
+
+					// update box_info table 
+
+					insertTableSQL = 
+							"WITH upsert AS " +
+									"(UPDATE plnmonitor.lockss_box_info " +
+									"SET username = ?, " +
+									"password = ?, " +
+									"longitude = ?, " +
+									"latitude = ?, " +
+									"country = ?, " +
+									"name = ? " +
+									"WHERE box=? RETURNING *), " +
+
+							"inserted AS ("+
+							"INSERT INTO plnmonitor.lockss_box_info " +
+							"(box,username,password,longitude,latitude,country,name) "+
+							"SELECT ?,?,?,?,?,?,? WHERE NOT EXISTS "+
+							"(SELECT * FROM upsert) "+
+							"RETURNING *) "+
+							"SELECT * " +
+							"FROM upsert " +
+							"union all " +
+							"SELECT * " +
+							"FROM inserted";
+
+					preparedStatement = dbConnection.prepareStatement(insertTableSQL, Statement.KEEP_CURRENT_RESULT);
+					preparedStatement.setString(1, username);
+					preparedStatement.setString(2, password);
+					preparedStatement.setDouble(3, Double.valueOf(longitude));
+					preparedStatement.setDouble(4, Double.valueOf(latitude));
+					preparedStatement.setString(5, country);
+					preparedStatement.setString(6, boxname);
+
+					preparedStatement.setInt(7, boxId);
+
+					preparedStatement.setInt(8, boxId);
+					preparedStatement.setString(9, username);
+					preparedStatement.setString(10, password);
+					preparedStatement.setDouble(11, Double.valueOf(longitude));
+					preparedStatement.setDouble(12, Double.valueOf(latitude));
+					preparedStatement.setString(13, country);
+					preparedStatement.setString(14, boxname);
+
+					rs=preparedStatement.executeQuery();
+					if (rs.next()) {
+						boxId = rs.getInt("id");
+					}
+
+				} catch (SQLException e) {
+					System.out.println(e.getMessage());
+
+				} finally {
+					if (preparedStatement != null) {
+						preparedStatement.close();
+					}
+					if (dbConnection != null) {
+						dbConnection.close();
+					}
+				}	
+
+
+			}
+
+
+		}
+		catch (Exception e)
+		{
+			e.printStackTrace() ;
+		}
+
 	}
 
 	/**
@@ -221,13 +573,44 @@ public class DaemonStatusWebService {
 		Integer boxId=null;
 		Map<String, String> headers = null;
 
+
 		try {
-			// Call the service and get the results of the query.
-			// Store AUs results for each server in a Hashmap (server name, list of Aus)
-			this.authenticate(); //basic authentication (inline)
+
+			// Call the service and get results of the queries.
+
+			// Get credentials from database for current box
+			try {							
+				String getcredentialsQuery = "SELECT username, password from plnmonitor.lockss_box as box INNER JOIN plnmonitor.lockss_box_info AS info "
+						+ "ON box.id = info.box WHERE box.ipaddress = ? AND box.pln = ?"; // WHERE pln=" + plnID;
+
+				dbConnection = getDBConnection();
+
+				preparedStatement = dbConnection.prepareStatement(getcredentialsQuery, Statement.KEEP_CURRENT_RESULT);
+
+				preparedStatement.setString(1, boxIpAddress);
+				preparedStatement.setInt(2, plnID);
+
+				ResultSet rs=preparedStatement.executeQuery();
+
+				if (rs.next()) {
+					username = rs.getString("username");
+					password = rs.getString("password");
+				} 
+			}
+			catch (SQLException e) {
+				System.out.println(e.getMessage());
+			} finally {
+				if (dbConnection != null) {
+					dbConnection.close();
+				}
+			}
+
+
+			this.authenticate(username, password); //basic authentication (inline)
+
 
 			String boxHostname = boxIpAddress;
-			
+
 			//ugly fix for UGent - please ignore this
 			if (boxIpAddress.matches("157.193.230.142")) {
 				boxHostname = "shaw.ugent.be";
@@ -243,7 +626,7 @@ public class DaemonStatusWebService {
 
 			catch (WebServiceException e) {
 				System.out.println(e.toString());
-				System.out.println("Nothing to do connnection unavailable...");
+				System.out.println("Nothing to do connection unavailable...");
 			}
 
 			try {
@@ -593,7 +976,7 @@ public class DaemonStatusWebService {
 
 								preparedStatement.executeUpdate();
 
-								System.out.println("Record "+ currentAU.getName() + "is inserted into AU_current table!");
+								System.out.println("Record "+ currentAU.getName() + " is inserted into AU_current table!");
 
 							} catch (SQLException e) {
 
@@ -625,8 +1008,87 @@ public class DaemonStatusWebService {
 			e.printStackTrace() ;
 		}
 
+
 	}
 
+	/** Set admin credentials in the plnmonitor database
+	 * @return 
+	 * 
+	 */
+	public void setCredentials(String username, String role, String password)
+	{
+		Connection dbConnection = null;
+		PreparedStatement preparedStatement=null;
+
+		try {				
+			Integer userId = null;
+			String pwHash = BCrypt.hashpw(password, BCrypt.gensalt()); 
+
+			String configUrlQuery = "UPSERT * from plnmonitor.user where name=" + username;
+
+			dbConnection = getDBConnection();
+
+			String insertTableSQL = 
+					"WITH upsert AS " +
+							"(UPDATE plnmonitor.user " +
+							"SET \"passwordHash\" = ?, " +
+							"role = ? "  +
+							"WHERE name=? RETURNING *), " +
+
+					"inserted AS ("+
+					"INSERT INTO plnmonitor.user " +
+					"(name,\"passwordHash\",role) "+
+					"SELECT ?,?,? WHERE NOT EXISTS "+
+					"(SELECT * FROM upsert) "+
+					"RETURNING *) "+
+					"SELECT * " +
+					"FROM upsert " +
+					"union all " +
+					"SELECT * " +
+					"FROM inserted";
+
+			dbConnection = getDBConnection();
+			preparedStatement = dbConnection.prepareStatement(insertTableSQL, Statement.KEEP_CURRENT_RESULT);
+			preparedStatement.setString(1, pwHash);
+			preparedStatement.setString(2, role);
+			preparedStatement.setString(3, username);
+
+			preparedStatement.setString(4, username);
+			preparedStatement.setString(5, pwHash);
+			preparedStatement.setString(6, role);
+
+			System.out.println(preparedStatement.toString());
+			ResultSet rs=preparedStatement.executeQuery();
+			if (rs.next()) {
+				userId = rs.getInt("id");
+				System.out.println("Added or updated user: " + username + " to the database with ID: " + userId + " " + pwHash  );
+			}
+		}
+		catch (SQLException e) {
+
+			System.out.println(e.getMessage());
+
+		} 
+
+		finally {
+			try {
+				if (preparedStatement != null) {
+					preparedStatement.close();
+				}
+
+				if (dbConnection != null) {
+					dbConnection.close();
+				}
+			}
+			catch (SQLException e) {
+
+				System.out.println(e.getMessage());
+
+			}
+
+		}
+
+	}
 
 
 	/**
@@ -634,13 +1096,13 @@ public class DaemonStatusWebService {
 	 *
 	 * @return the DB connection
 	 */
-	private static Connection getDBConnection() {
+	private Connection getDBConnection() {
 
 		Connection dbConnection = null;
 
 		try {
 
-			Class.forName(DB_DRIVER);
+			Class.forName(dbDriver);
 
 		} catch (ClassNotFoundException e) {
 
@@ -650,8 +1112,7 @@ public class DaemonStatusWebService {
 
 		try {
 
-			dbConnection = DriverManager.getConnection(
-					DB_CONNECTION, DB_USER,DB_PASSWORD);
+			dbConnection = DriverManager.getConnection(dbConnectionURL, dbUser, dbPassword);
 			return dbConnection;
 
 		} catch (SQLException e) {
@@ -664,28 +1125,31 @@ public class DaemonStatusWebService {
 
 	}
 
+
 	/**
 	 * Gets the current time stamp.
 	 *
 	 * @return the current time stamp
 	 */
-	private static java.sql.Timestamp getCurrentTimeStamp() {
+	private java.sql.Timestamp getCurrentTimeStamp() {
 
 		java.util.Date today = new java.util.Date();
 		return new java.sql.Timestamp(today.getTime());
 
 	}
 
-	//TODO: Currently hardcoded username and password for debug user - info needs to come from DB
 	/**
 	 * Sets the authenticator that will be used by the networking code when the
 	 * HTTP server asks for authentication.
 	 */
-	private void authenticate() {
+
+	private void authenticate(final String username, final String password) {
 		Authenticator.setDefault(new Authenticator() {
+
 			@Override
 			protected PasswordAuthentication getPasswordAuthentication() {
-				return new PasswordAuthentication(USER_NAME, PASSWORD.toCharArray());
+
+				return new PasswordAuthentication(username, password.toCharArray());
 			}
 		});
 	}
@@ -722,5 +1186,7 @@ public class DaemonStatusWebService {
 			httpclient.close();
 		}
 	}
+
+
 
 }

@@ -54,7 +54,11 @@
     <artifactId>oro</artifactId>
     <version>2.0.8</version>
 </dependency>
-<!-- https://mvnrepository.com/artifact/commons-io/commons-io -->
+<dependency>
+  <groupId>org.mindrot</groupId>
+  <artifactId>jbcrypt</artifactId>
+  <version>0.4</version>
+</dependency>
 <dependency>
     <groupId>commons-io</groupId>
     <artifactId>commons-io</artifactId>

@@ -12,9 +12,9 @@ import org.apache.http.util.EntityUtils;
 
 
 /**
- * The Class FormBasedAuthentification.
+ * The Class FormBasedAuthentication.
  * 
- * Unsuccessful attempt to use form-based authentification for boxes with SSL enabled
+ * Unsuccessful attempt to use form-based authentication for boxes with SSL enabled
  * form-based authentication
  */
 public class FormBasedAuthentification {
