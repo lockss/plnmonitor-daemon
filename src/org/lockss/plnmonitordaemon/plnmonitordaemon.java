@@ -1,5 +1,8 @@
 package org.lockss.plnmonitordaemon;
 
+import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileWriter;
 import java.net.URL;
 import java.util.HashMap;
 import java.util.List;
@@ -30,13 +33,13 @@ public class plnmonitordaemon {
 
 
 	/**  URL of props server */
-	private static String LOCKSS_PROP_SERVER = "http://lockssadmin.ulb.ac.be/lockss.xml";
+	private static String LOCKSS_PROP_SERVER = "https://lockssadmin.ulb.ac.be/lockss.xml";
 
 	/** Postgresql driver */
 	private static String dbDriver = "org.postgresql.Driver";
 
 	/** Database IP or hostname*/
-	private static String dbIP = "127.0.0.1";
+	private static String dbIP = "plnmonitordb";
 
 	/** Database port*/
 	private static String dbPort = "5432";
@@ -59,12 +62,16 @@ public class plnmonitordaemon {
 	/** boxPassword. Default daemon UI password for user with debug info access only (read) for all lockss boxes in the network (8081)*/
 	private static String boxPassword = "debuglockss";	
 
+
+
 	/**
 	 * The main method.
 	 *
 	 * @param args the arguments
 	 */
 	public static void main(String[] args) {
+
+		//Instantiating the File class
 
 
 
@@ -82,10 +89,10 @@ public class plnmonitordaemon {
 					Integer plnID = entry.getKey();
 					String configFile = entry.getValue();
 
-					System.out.println("Loading lockss.xml configuration file from: " + configFile);
+					System.out.println((char)27 + "[34mLoading lockss.xml configuration file from: " + configFile + (char)27 + "[39m");
 					List<String> boxIpAddresses = dsws.loadPLNConfiguration(plnID, "pln", configFile);
 					for (String boxIpAddress : boxIpAddresses) {
-						System.out.println("Loading configuration of: " + boxIpAddress);
+						System.out.println((char)27 + "[34mLoading configuration of: " + boxIpAddress);
 						dsws.loadDaemonStatus(plnID, boxIpAddress);
 					}
 				}
@@ -98,62 +105,81 @@ public class plnmonitordaemon {
 		//TODO: record configuration in the config file
 		else if ((args.length == 1) && (args[0].compareTo("config")==0 )  ) {
 
-			Scanner userAnswer = new Scanner(System.in);
-			String currentAnswer;
+			String pivotTableRequest = "select au_current.name, ";
 
-			System.out.println("This script helps you configure the plnmonitor database for your lockss network ");
+			System.out.println((char)27 + "[34mSetting up PLN dashboard based on Grafana"  + (char)27 + "[39m");
 
-			System.out.println("lockss.xml URL (LOCKSS network props server): ["+ LOCKSS_PROP_SERVER + "]");
-			currentAnswer = userAnswer.nextLine();
-			if (!currentAnswer.isEmpty()) {
-				LOCKSS_PROP_SERVER = currentAnswer;
-			}
-
-			System.out.println("\n\nPLN monitor posgres database configuration (leave default settings by pressing enter) ");
-
-			System.out.println("Postgres server IP or hostname: ["+ dbIP + "]");
-			currentAnswer = userAnswer.nextLine();
-			if (!currentAnswer.isEmpty()) {
-				dbIP = currentAnswer;
-			}
-
-			System.out.println("Postgres server port: ["+ dbPort + "]");
-			currentAnswer = userAnswer.nextLine();
-			if (!currentAnswer.isEmpty()) {
-				dbPort = currentAnswer;
-			}
-
-			System.out.println("Postgres database name: ["+ dbName + "]");
-			currentAnswer = userAnswer.nextLine();
-			if (!currentAnswer.isEmpty()) {
-				dbName = currentAnswer;
-			}
-
-			System.out.println("Postgres database user: ["+ dbUser + "]");
-			currentAnswer = userAnswer.nextLine();
-			if (!currentAnswer.isEmpty()) {
-				dbUser = currentAnswer;
-			}
-
-			System.out.println("Postgres database password: ["+ dbPassword + "]");
-			currentAnswer = userAnswer.nextLine();
-			if (!currentAnswer.isEmpty()) {
-				dbPassword = currentAnswer;
-			}
+			String filePath = "/opt/template/dashboard_template.json";
+			//Instantiating the Scanner class to read the file
+			Scanner sc;
 
 			try {
-				dbConnectionURL = "jdbc:postgresql://" + dbIP + ":" + dbPort + "/" + dbName;
-				dsws = new DaemonStatusWebService(dbConnectionURL, dbUser, dbPassword, dbDriver);
+				sc = new Scanner(new File(filePath));
+				//instantiating the StringBuffer class
+				StringBuffer buffer = new StringBuffer();
+				//Reading lines of the file and appending them to StringBuffer
+				while (sc.hasNextLine()) {
+					buffer.append(sc.nextLine()+System.lineSeparator());
+				}
+				String fileContents = buffer.toString();
+				sc.close();
+
+				Scanner userAnswer = new Scanner(System.in);
+				String currentAnswer;
+
+				System.out.println("This script helps you configure the plnmonitor database for your lockss network ");
+
+				System.out.println("lockss.xml URL (LOCKSS network props server): ["+ LOCKSS_PROP_SERVER + "]");
+				currentAnswer = userAnswer.nextLine();
+				if (!currentAnswer.isEmpty()) {
+					LOCKSS_PROP_SERVER = currentAnswer;
+				}
+
+				System.out.println("\n\nPLN monitor posgres database configuration (leave default settings by pressing enter) ");
+
+				System.out.println("Postgres server hostname: ["+ dbIP + "]");
+				currentAnswer = userAnswer.nextLine();
+				if (!currentAnswer.isEmpty()) {
+					dbIP = currentAnswer;
+				}
+
+				System.out.println("Postgres server port: ["+ dbPort + "]");
+				currentAnswer = userAnswer.nextLine();
+				if (!currentAnswer.isEmpty()) {
+					dbPort = currentAnswer;
+				}
+
+				System.out.println("Postgres database name: ["+ dbName + "]");
+				currentAnswer = userAnswer.nextLine();
+				if (!currentAnswer.isEmpty()) {
+					dbName = currentAnswer;
+				}
+
+				System.out.println("Postgres database user: ["+ dbUser + "]");
+				currentAnswer = userAnswer.nextLine();
+				if (!currentAnswer.isEmpty()) {
+					dbUser = currentAnswer;
+				}
+
+				System.out.println("Postgres database password: ["+ dbPassword + "]");
+				currentAnswer = userAnswer.nextLine();
+				if (!currentAnswer.isEmpty()) {
+					dbPassword = currentAnswer;
+				}
+
+				try {
+					dbConnectionURL = "jdbc:postgresql://" + dbIP + ":" + dbPort + "/" + dbName;
+					dsws = new DaemonStatusWebService(dbConnectionURL, dbUser, dbPassword, dbDriver);
 
 					// collect lockss_box info from user input
 
 					System.out.println("Loading lockss.xml configuration file from: " + LOCKSS_PROP_SERVER);
 					List<String> boxIpAddresses = dsws.loadPLNConfiguration(1, "pln", LOCKSS_PROP_SERVER);
-					
+
 					System.out.println("\n\n" + boxIpAddresses.size() + " LOCKSS boxes detected in your network");
 
 					for (String boxIpAddress : boxIpAddresses) {
-						System.out.println("\n\nSetting configuration of: " + boxIpAddress);
+						System.out.println("\n\n" + (char)27 + "[36mSetting configuration of: " + boxIpAddress + (char)27 + "[39m");
 
 						System.out.println("Getting most likely lockss box location :");	
 
@@ -164,6 +190,8 @@ public class plnmonitordaemon {
 						String latitude = "50.810061";
 						String country = "Belgium";
 						String city = "Brussels";
+						//String institutionname = "ULB";
+						
 
 						DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
 						factory.setNamespaceAware(true);
@@ -206,7 +234,7 @@ public class plnmonitordaemon {
 							password = currentAnswer;
 						}
 
-						System.out.println("\n\nLoading current configuration of: " + boxIpAddress + " (if available)");
+						System.out.println("\n\n" + (char)27 + "[33mTrying to load the current configuration of: " + boxIpAddress + " - Please wait." + (char)27 + "[39m");
 
 						// get current config info from box
 						HashMap <String, String> boxInfo = dsws.getBoxInfo(1, boxIpAddress, username, password);
@@ -223,7 +251,7 @@ public class plnmonitordaemon {
 						else {
 							System.out.println("No box info currently available in the database");
 						}
-						System.out.println("Please provide or confirm LOCKSS box information:");
+						System.out.println((char)27 + "[33mPlease provide or confirm LOCKSS box information (just hit enter for default value in brackets):"  + (char)27 + "[39m");
 
 						while (true) {
 
@@ -240,7 +268,7 @@ public class plnmonitordaemon {
 									break;
 								} 
 								catch (NumberFormatException e) {
-									System.out.println("Error: Please provide a valid number for your answer.\n");
+									System.out.println((char)27 + "[31mError: Please provide a valid number for your answer.\n"  + (char)27 + "[39m");
 								}
 							}
 						}
@@ -260,7 +288,7 @@ public class plnmonitordaemon {
 									break;
 								} 
 								catch (NumberFormatException e) {
-									System.out.println("Error: Please provide a valid number for your answer.\n");
+									System.out.println((char)27 + "[31mError: Please provide a valid number for your answer.\n"  + (char)27 + "[39m");
 								}
 							}
 						}
@@ -271,50 +299,82 @@ public class plnmonitordaemon {
 							country = currentAnswer;
 						}
 
-						System.out.println("Please give this LOCKSS box a nickname: [" + boxname + "]");
+						System.out.println((char)27 + "[33mPlease give this LOCKSS box a nickname: [" + boxname + "]"  + (char)27 + "[39m");
 						currentAnswer = userAnswer.nextLine();
 						if (!currentAnswer.isEmpty()) {
 							boxname = currentAnswer;
 						}
-
 						
+//						institutionname = boxname;
+//						System.out.println((char)27 + "[33mWTo which institution does this box belong? [" + institutionname + "]"  + (char)27 + "[39m");
+//						currentAnswer = userAnswer.nextLine();
+//						if (!currentAnswer.isEmpty()) {
+//							institutionname = currentAnswer;
+//						}
+						
+
+						System.out.println("Please wait, the database is being updated with LOCKSS box data from " + boxname + " ...");
 						// update postgres accordingly
 						dsws.setBoxInfo(1, boxIpAddress, username, password, latitude, longitude, country, boxname);
+
+						pivotTableRequest =  pivotTableRequest + " MAX(CASE WHEN lockss_box_info.name = '" + boxname +"' THEN recent_poll_agreement END) AS \\\\\"" + boxname + "\\\\\" ,"; 
+
 						System.out.println("****************************************************************");
 					}
-					
-					System.out.println("Setting administrator credentials for plnmonitor webapp");
-					
+
+					pivotTableRequest = pivotTableRequest.substring(0, pivotTableRequest.length() - 2) + " from plnmonitor.au_current inner join plnmonitor.lockss_box_info on au_current.box=lockss_box_info.box GROUP BY 1 ORDER BY 1";
+
+
+					//Replacing the pivot request line with box info
+					fileContents = fileContents.replaceAll("PIVOTRAWSQLREQUEST", pivotTableRequest);
+					//instantiating the FileWriter class
+					FileWriter writer = new FileWriter("/opt/provisioning/dashboards/plnmonitor/dashboard.json");
+					writer.append(fileContents);
+					writer.flush();
+
+
+					System.out.println("Setting administrator credentials for webapp");
+
 					String adminname = "admin"; 
 					String adminpassword = "admin";
-					System.out.println("\n\nPlease give admin username: [" + adminname + "]");
+					System.out.println("\n\n" + (char)27 + "[33mPlease provide the admin username: [" + adminname + "]"  + (char)27 + "[39m");
 					currentAnswer = userAnswer.nextLine();
 					if (!currentAnswer.isEmpty()) {
 						adminname = currentAnswer;
 					}
-					System.out.println("Please give admin password: [" + adminpassword + "]");
+					System.out.println((char)27 + "[33mPlease provide the admin password: [" + adminpassword + "]"  + (char)27 + "[39m");
 					currentAnswer = userAnswer.nextLine();
 					if (!currentAnswer.isEmpty()) {
 						adminname = currentAnswer;
 					}
-					
-					
+
+
 					dsws.setCredentials(adminname, "ADMIN", adminpassword);
 
 					System.out.println("\n\nplnmonitor is ready to run");
-					System.out.println("You can now launch plnmonitor by executing ./start.sh");
+					System.out.println((char)27 + "[32mYou can now launch plnmonitor by executing ./start.sh"  + (char)27 + "[39m");
 					userAnswer.close();
-					
-					
-			} catch (Exception e) {
-				System.out.println("An error occured during the configuration of your LOCKSS network.");
-				e.printStackTrace();
+
+
+
+
+
+				} catch (Exception e) {
+					System.out.println((char)27 + "[31mAn error occured during the configuration of your LOCKSS network."  + (char)27 + "[39m");
+					e.printStackTrace();
+				}
+			} catch (FileNotFoundException e1) {
+				System.out.println("Can't find dashboard_template.json file in the template directory");
+				e1.printStackTrace();
 			}
-		
+
 		}
 		else {
 			System.out.println("Usage: \'java -jar plnmonitor-daemon-service config\' to configure or \\'java -jar plnmonitordaemon\\' to run");
 		}
+
+
+
 	}
 
 }

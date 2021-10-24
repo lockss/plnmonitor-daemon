@@ -393,7 +393,7 @@ public class DaemonStatusWebService {
 
 			catch (WebServiceException e) {
 				System.out.println(e.toString());
-				System.out.println("Can't connect to the LOCKSS box " + boxHostname + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control");
+				System.out.println((char)27 + "[31mCan't connect to the LOCKSS box " + boxHostname + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control" + (char)27 + "[39m");
 			}
 
 			try {
@@ -612,9 +612,9 @@ public class DaemonStatusWebService {
 			String boxHostname = boxIpAddress;
 
 			//ugly fix for UGent - please ignore this
-			if (boxIpAddress.matches("157.193.230.142")) {
-				boxHostname = "shaw.ugent.be";
-			}
+			//if (boxIpAddress.matches("157.193.230.142")) {
+			//	boxHostname = "shaw.ugent.be";
+			//}
 			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
 
 			try {
@@ -626,16 +626,21 @@ public class DaemonStatusWebService {
 
 			catch (WebServiceException e) {
 				System.out.println(e.toString());
-				System.out.println("Nothing to do connection unavailable...");
+				System.out.println("\u001B[31m Nothing to do connection unavailable... \u001B[0m");
 			}
 
 			try {
 				if (service != null) {  //if service available, get all data from the LOCKSS box
 					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					System.out.println("\u001B[32m Getting platform configuration...\u001B[0m");
 					boxConfiguration = dss.getPlatformConfiguration();
+					System.out.println("\u001B[32m Getting repository spaces status...\u001B[0m");
 					repositoryBox = dss.queryRepositorySpaces("select *");
+					System.out.println("\u001B[32m Getting AUs status... \u001B[0m");
 					ausFromCurrentBox = dss.queryAus(QUERY);
+					System.out.println("\u001B[32m Getting peers status...\u001B[0m");
 					peersBox = dss.queryPeers("select *");
+					System.out.println("\u001B[32m Getting repository status...\u001B[0m");
 					repo = dss.queryRepositories("select *");
 				}
 			}
@@ -643,6 +648,7 @@ public class DaemonStatusWebService {
 				System.out.println(e.toString());
 			}
 
+			System.out.println("\u001B[32m Updating LOCKSS boxes configurations in the database \u001B[0m");
 			// if data from plaftorm configuration is available, update the LOCKSS box table accordingly in the database
 			if (boxConfiguration!=null){
 				//update LOCKSS box config in the LOCKSS_box database
@@ -728,6 +734,8 @@ public class DaemonStatusWebService {
 			// if repository box data is collected for the current LOCKSS Box identified by box id and repository_space_lockss_id
 			// insert the results in the table lockss_box_data_current
 
+			System.out.println("\u001B[32m Updating LOCKSS boxes respository space in the database... \u001B[0m");
+
 			if (repositoryBox != null) {
 				for (RepositorySpaceWsResult currentBoxResult : repositoryBox) {
 					try {							
@@ -796,6 +804,7 @@ public class DaemonStatusWebService {
 
 
 				// if peers box data is collected from the LOCKSS Box, insert the results in the table Peers
+				System.out.println("\u001B[32m Updating peers status in the database... \u001B[0m");
 
 				if (peersBox != null) {
 
@@ -877,6 +886,7 @@ public class DaemonStatusWebService {
 					}
 
 					// if AUs box data is collected from the LOCKSS Box, insert the results in the table AU_current
+					System.out.println("\u001B[32m Updating AU status in the database... \u001B[0m");
 
 					if (ausFromCurrentBox != null) {
 						for (AuWsResult currentAU :  ausFromCurrentBox) {
@@ -976,7 +986,7 @@ public class DaemonStatusWebService {
 
 								preparedStatement.executeUpdate();
 
-								System.out.println("Record "+ currentAU.getName() + " is inserted into AU_current table!");
+								System.out.println("Record "+ currentAU.getName() + " is inserted into AU_current table.");
 
 							} catch (SQLException e) {
 
@@ -996,7 +1006,121 @@ public class DaemonStatusWebService {
 						}
 					}
 
+					// if AUs box data is collected from the LOCKSS Box, insert the results in the table AU_current
+					System.out.println("\u001B[32m Updating AU summary status in the database... \u001B[0m");
 
+					
+					// select distinct(tdb_publisher) from au_current; 
+					// for each tdb_publisher get total size
+					//WITH distinctAU AS (SELECT name, tdb_publisher, MAX(content_size)as content_size FROM au_current GROUP BY name, tdb_publisher) select SUM(CASE WHEN tdb_publisher = 'Universiteit Gent' THEN content_size/2 END) AS "Universiteit Gent" from distinctAU;
+					
+					// upsert (tdb_publisher, size) to table
+					try {							
+
+						ArrayList<String> tdbPublishers = new ArrayList<String>();
+					
+					
+						String queryTableSQL = "SELECT distinct(tdb_publisher) FROM plnmonitor.au_current"; 
+
+						dbConnection = getDBConnection();
+						preparedStatement = dbConnection.prepareStatement(queryTableSQL, Statement.KEEP_CURRENT_RESULT);
+
+						ResultSet rs=preparedStatement.executeQuery();
+
+						while (rs.next()) {
+							tdbPublishers.add(rs.getString("tdb_publisher"));
+						}
+					    
+						String SQLRequest;
+						
+						if (tdbPublishers != null) {
+							SQLRequest = "DROP TABLE IF EXISTS content_per_tdb_publisher"; 
+							preparedStatement = dbConnection.prepareStatement(SQLRequest);
+							preparedStatement.executeUpdate();
+							
+							SQLRequest = "CREATE TABLE content_per_tdb_publisher(id serial primary key)";
+							preparedStatement = dbConnection.prepareStatement(SQLRequest);
+							preparedStatement.executeUpdate();
+
+							//TODO: Replace ID=1 by PLNid 
+							SQLRequest = "INSERT INTO content_per_tdb_publisher(id) VALUES (1)";
+							preparedStatement = dbConnection.prepareStatement(SQLRequest);
+							preparedStatement.executeUpdate();
+
+						}
+						for (String tdbPublisher : tdbPublishers) {
+							if (tdbPublisher != null && !tdbPublisher.isEmpty()) {
+								queryTableSQL = "WITH distinctAU AS (SELECT name, tdb_publisher, MAX(content_size) as content_size FROM au_current GROUP BY name, tdb_publisher) select SUM(CASE WHEN tdb_publisher = \'" + tdbPublisher + "\' THEN content_size END) as content_size from distinctAU";
+								preparedStatement = dbConnection.prepareStatement(queryTableSQL, Statement.KEEP_CURRENT_RESULT);
+							
+								Long contentSize=(long) 0;
+								ResultSet tdbResults=preparedStatement.executeQuery();
+								if (tdbResults.next()) {
+									contentSize = tdbResults.getLong("content_size");
+								}
+							
+//								String insertTableSQL = "WITH upsert AS (UPDATE plnmonitor.au_per_publisher " +
+//									"SET tdb_publisher = ?, " +
+//									"content_size = ? " + 
+//									"WHERE tdb_publisher=? RETURNING *)" +
+//									"INSERT INTO plnmonitor.au_per_publisher " +
+//									"(tdb_publisher,content_size)" + 
+//									"SELECT " +
+//									"?,? WHERE NOT EXISTS "+
+//									"(SELECT * FROM upsert)";
+//
+//								preparedStatement = dbConnection.prepareStatement(insertTableSQL);
+//								preparedStatement.setString(1, tdbPublisher);
+//								preparedStatement.setLong(2, contentSize);
+//
+//								preparedStatement.setString(3, tdbPublisher);
+//
+//								preparedStatement.setString(4, tdbPublisher);
+//								preparedStatement.setLong(5, contentSize);
+//							
+//								System.out.println(preparedStatement.toString());
+//							
+//								preparedStatement.executeUpdate();
+								
+								
+								SQLRequest ="ALTER TABLE content_per_tdb_publisher add column \"" + tdbPublisher + "\" bigint";
+								preparedStatement = dbConnection.prepareStatement(SQLRequest);
+								preparedStatement.executeUpdate();
+									            
+								//TODO: replace id=1 by PLN ID
+								SQLRequest = "UPDATE content_per_tdb_publisher set \"" + tdbPublisher + "\"= " + contentSize + " where id=1";
+								preparedStatement = dbConnection.prepareStatement(SQLRequest);
+								preparedStatement.executeUpdate();
+								
+							}
+						}
+
+					} catch (SQLException e)  {
+						System.out.println(e.getMessage());
+
+					} finally {
+						if (preparedStatement != null) {
+							preparedStatement.close();
+						}
+					if (dbConnection != null) {
+						dbConnection.close();
+					}
+				}
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
+					
 				}
 
 			}
