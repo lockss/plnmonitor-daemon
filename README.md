@@ -7,9 +7,9 @@ The network status data are stored into a local postgres database.
 The plnmonitor-webapp then uses information collected in this local database to expose the overall LOCKSS network status in a web application. 
 
 ## Dependencies:
-* Sun JDK 7. Java 8 is not yet supported.
-* Postgresql 9.4
-* LOCKSS 1.73 
+* Java 8
+* Postgresql 9.4+
+* LOCKSS 1.73+ 
 
 ## Installation
 
