@@ -61,9 +61,19 @@ public class plnmonitordaemon {
 
 	/** boxPassword. Default daemon UI password for user with debug info access only (read) for all lockss boxes in the network (8081)*/
 	private static String boxPassword = "debuglockss";	
+	
+	/** Dashboard templates path */
+	private static String dashboardTemplatePath = "/opt/template/dashboard_template.json";
+	private static String lockssBoxTemplatePath = "/opt/template/lockss_box_template.json";
+	private static String tdbPublisherTemplatePath = "/opt/template/tdb_publisher_template.json";
 
+    /** Dashboard provisioning path */
+	private static String dashboardProvisioningPath =  "/opt/provisioning/dashboards/";
+	private static String boxProvisioningPath = dashboardProvisioningPath + "boxes/";
+	private static String tdbPublisherProvisioningPath =  dashboardProvisioningPath + "tdb_publishers/";
+		
 
-
+	
 	/**
 	 * The main method.
 	 *
@@ -112,14 +122,6 @@ public class plnmonitordaemon {
 			// First part of the SQL query string
 			String pivotTableRequest = "select au_current.name, ";
 
-			//TODO: make template path configurable
-			String dashboardTemplatePath = "/opt/template/dashboard_template.json";
-
-			//TODO: make template path configurable
-			String lockssBoxTemplatePath = "/opt/template/lockss_box_template.json";
-
-			//TODO: make template path configurable
-			String tdbPublisherTemplatePath = "/opt/template/tdb_publisher_template.json";
 
 			System.out.println((char)27 + "[34mSetting up PLN dashboard based on Grafana"  + (char)27 + "[39m");
 
@@ -148,7 +150,7 @@ public class plnmonitordaemon {
 
 				//clear buffer before reading another template file
 				buffer.setLength(0);
-				sc = new Scanner(new File(lockssBoxTemplatePath));
+				sc = new Scanner(new File(tdbPublisherTemplatePath));
 
 				// Reading TDB Publisher template file and putting contents in the dahsboardTemplateContents variable
 				while (sc.hasNextLine()) {
@@ -356,7 +358,7 @@ public class plnmonitordaemon {
 						System.out.println("****************************************************************");
 
 						System.out.println("Creating dashboard for LOCKSS box " + boxname);
-						File dir = new File("/opt/provisioning/dashboards/boxes/");
+						File dir = new File(boxProvisioningPath);
 
 						// create box directory if it does not exist
 						dir.mkdirs();
@@ -364,7 +366,7 @@ public class plnmonitordaemon {
 						// replace LOCKSS_BOX_NAME -> boxname in Grafana LOCKSS Box template file
 						String lockssBoxContents = lockssBoxTemplateContents.replaceAll("LOCKSS_BOX_NAME", boxname);
 
-						FileWriter writer = new FileWriter("/opt/provisioning/dashboards/boxes/"+ boxname.replaceAll("\\W+", "")  +".json");
+						FileWriter writer = new FileWriter(boxProvisioningPath + boxname.replaceAll("\\W+", "")  +".json");
 						writer.append(lockssBoxContents);
 						writer.flush();
 						writer.close();
@@ -377,7 +379,7 @@ public class plnmonitordaemon {
 					//Replacing the pivot request line with box info
 					dahsboardTemplateContents = dahsboardTemplateContents.replaceAll("PIVOTRAWSQLREQUEST", pivotTableRequest);
 					//instantiating the FileWriter class
-					FileWriter writer = new FileWriter("/opt/provisioning/dashboards/dashboard.json");
+					FileWriter writer = new FileWriter(dashboardProvisioningPath + "dashboard.json");
 					writer.append(dahsboardTemplateContents);
 					writer.flush();
 					writer.close();
@@ -386,7 +388,7 @@ public class plnmonitordaemon {
 					// LOCKSS_TDB_PUBLISHER_NAME
 					System.out.println("Creating TDB publisher dashboards");
 
-					File dir = new File("/opt/provisioning/dashboards/tdb_publishers/");
+					File dir = new File(tdbPublisherProvisioningPath);
 
 					// create box directory if it does not exist
 					dir.mkdirs();
@@ -401,13 +403,12 @@ public class plnmonitordaemon {
 
 					for (String tdbPublisher : tdbPublishers) {
 
-
 						// replace LOCKSS_BOX_NAME -> boxname in Grafana LOCKSS Box template file
 						if ((tdbPublisher != null) && (tdbPublisher.length()!=0)) {
 							System.out.println("Creating dashboard for TDB Publisher: " + tdbPublisher);
 							String tdbPublisherContents = tdbPublisherTemplateContents.replaceAll("LOCKSS_TDB_PUBLISHER_NAME", tdbPublisher);
 
-							FileWriter dirWriter = new FileWriter(dir + tdbPublisher.replaceAll("\\W+", "")  +".json");
+							FileWriter dirWriter = new FileWriter(tdbPublisherProvisioningPath + tdbPublisher.replaceAll("\\W+", "")  +".json");
 							dirWriter.append(tdbPublisherContents);
 							dirWriter.flush();
 							dirWriter.close();
@@ -436,9 +437,6 @@ public class plnmonitordaemon {
 					System.out.println("\n\nplnmonitor is ready to run");
 					System.out.println((char)27 + "[32mYou can now launch plnmonitor by executing ./start.sh"  + (char)27 + "[39m");
 					userAnswer.close();
-
-
-
 
 
 				} catch (Exception e) {

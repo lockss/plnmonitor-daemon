@@ -586,7 +586,7 @@ public class DaemonStatusWebService {
 					if (rs != null) {
 						tdbPublishers = new ArrayList<String>();
 					}
-					if (rs.next()) {
+					while (rs.next()) {
 						tdbPublishers.add(rs.getString("tdb_publisher"));
 					}
 
