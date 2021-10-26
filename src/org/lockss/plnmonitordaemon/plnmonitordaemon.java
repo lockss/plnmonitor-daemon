@@ -406,7 +406,7 @@ public class plnmonitordaemon {
 						// replace LOCKSS_BOX_NAME -> boxname in Grafana LOCKSS Box template file
 						if ((tdbPublisher != null) && (tdbPublisher.length()!=0)) {
 							System.out.println("Creating dashboard for TDB Publisher: " + tdbPublisher);
-							String tdbPublisherContents = tdbPublisherTemplateContents.replaceAll("LOCKSS_TDB_PUBLISHER_NAME", tdbPublisher);
+							String tdbPublisherContents = tdbPublisherTemplateContents.replaceAll("LOCKSS_TDB_PUBLISHER_NAME", tdbPublisher).replaceAll("PIVOTRAWSQLREQUEST", pivotTableRequest.replace("GROUP BY 1 ORDER BY 1", "WHERE tdb_publisher = '" + tdbPublisher +"'  GROUP BY 1 ORDER BY 1") );
 
 							FileWriter dirWriter = new FileWriter(tdbPublisherProvisioningPath + tdbPublisher.replaceAll("\\W+", "")  +".json");
 							dirWriter.append(tdbPublisherContents);
