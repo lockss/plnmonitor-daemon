@@ -348,6 +348,7 @@ public class DaemonStatusWebService {
 		return boxInfo;
 	}
 
+	
 	/**
 	 * Set Box Info IN database 
 	 *
@@ -548,6 +549,66 @@ public class DaemonStatusWebService {
 
 	}
 
+	
+	/**
+	 * Get Box Info FROM database
+	 *
+	 * Returns a HashMap with information extracted from the postgres database for a given LOCKSS box :
+	 * - credentials for LOCKSS box UI access (username, password for debug user)
+	 * - geographical coordinates of the LOCKSS box
+	 * - country
+	 * - short name of the LOCKSS box
+	 *  
+	 * @param plnID the pln ID in the database
+	 * @param boxIpAddress the IP address 
+	 * @return plnMembers : the list of box IP addresses in the network 
+	 */
+
+	public List<String> getTdbPublishers(int plnID) throws SQLException {
+		// TODO: check plnID
+
+		List<String> tdbPublishers = null;
+		Connection dbConnection = null;
+		PreparedStatement preparedStatement=null;
+
+		try {
+			// Call the service and get the results of the query.
+			// Store AUs results for each server in a Hashmap (server name, list of Aus)
+			this.authenticate(username, password); //basic authentication (inline)
+
+			try {
+					String queryTableSQL = "SELECT distinct(tdb_publisher) FROM plnmonitor.au_current"; // WHERE pln=" + plnID;
+
+					dbConnection = getDBConnection();
+					preparedStatement = dbConnection.prepareStatement(queryTableSQL, Statement.KEEP_CURRENT_RESULT);
+
+					ResultSet rs=preparedStatement.executeQuery();
+					if (rs != null) {
+						tdbPublishers = new ArrayList<String>();
+					}
+					if (rs.next()) {
+						tdbPublishers.add(rs.getString("tdb_publisher"));
+					}
+
+
+				} catch (SQLException e)  {
+					System.out.println(e.getMessage());
+
+				} finally {
+					if (preparedStatement != null) {
+						preparedStatement.close();
+					}
+					if (dbConnection != null) {
+						dbConnection.close();
+					}
+				}
+		}
+		catch (Exception e) {
+			System.out.println(e.getMessage());
+		}
+		return tdbPublishers;
+	}
+	
 	/**
 	 * Load daemon status.
 	 *
@@ -1106,18 +1167,6 @@ public class DaemonStatusWebService {
 						dbConnection.close();
 					}
 				}
-					
-					
-					
-					
-					
-					
-					
-					
-					
-					
-					
-					
 					
 					
 					

@@ -12,7 +12,7 @@ import java.util.Scanner;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
-import org.lockss.plnmonitordaemon.DaemonStatusWebService;
+//import org.lockss.plnmonitordaemon.DaemonStatusWebService;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -105,23 +105,56 @@ public class plnmonitordaemon {
 		//TODO: record configuration in the config file
 		else if ((args.length == 1) && (args[0].compareTo("config")==0 )  ) {
 
+
+			// As Pivot is not available in Postgres, we need to set the column names in the SQL query performed by the dashboard
+			// This is replacing the "PIVOTRAWSQLREQUEST" tag in the Grafana dashboard template
+
+			// First part of the SQL query string
 			String pivotTableRequest = "select au_current.name, ";
+
+			//TODO: make template path configurable
+			String dashboardTemplatePath = "/opt/template/dashboard_template.json";
+
+			//TODO: make template path configurable
+			String lockssBoxTemplatePath = "/opt/template/lockss_box_template.json";
+
+			//TODO: make template path configurable
+			String tdbPublisherTemplatePath = "/opt/template/tdb_publisher_template.json";
 
 			System.out.println((char)27 + "[34mSetting up PLN dashboard based on Grafana"  + (char)27 + "[39m");
 
-			String filePath = "/opt/template/dashboard_template.json";
-			//Instantiating the Scanner class to read the file
 			Scanner sc;
 
 			try {
-				sc = new Scanner(new File(filePath));
-				//instantiating the StringBuffer class
+
+				// TODO: this is a temporary solution to automate dashboard creation -> it will later be replaced by dashboard spec/Grafonnet
+				// Reading Grafana Dashboard template file and puting contents in the dahsboardTemplateContents variable
+				sc = new Scanner(new File(dashboardTemplatePath));
 				StringBuffer buffer = new StringBuffer();
-				//Reading lines of the file and appending them to StringBuffer
 				while (sc.hasNextLine()) {
 					buffer.append(sc.nextLine()+System.lineSeparator());
 				}
-				String fileContents = buffer.toString();
+				String dahsboardTemplateContents = buffer.toString();
+
+				//clear buffer before reading another template file
+				buffer.setLength(0);
+				sc = new Scanner(new File(lockssBoxTemplatePath));
+
+				// Reading LOCKSS Box template file and putting contents in the dahsboardTemplateContents variable
+				while (sc.hasNextLine()) {
+					buffer.append(sc.nextLine()+System.lineSeparator());
+				}
+				String lockssBoxTemplateContents = buffer.toString();
+
+				//clear buffer before reading another template file
+				buffer.setLength(0);
+				sc = new Scanner(new File(lockssBoxTemplatePath));
+
+				// Reading TDB Publisher template file and putting contents in the dahsboardTemplateContents variable
+				while (sc.hasNextLine()) {
+					buffer.append(sc.nextLine()+System.lineSeparator());
+				}
+				String tdbPublisherTemplateContents = buffer.toString();
 				sc.close();
 
 				Scanner userAnswer = new Scanner(System.in);
@@ -191,7 +224,7 @@ public class plnmonitordaemon {
 						String country = "Belgium";
 						String city = "Brussels";
 						//String institutionname = "ULB";
-						
+
 
 						DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
 						factory.setNamespaceAware(true);
@@ -304,33 +337,82 @@ public class plnmonitordaemon {
 						if (!currentAnswer.isEmpty()) {
 							boxname = currentAnswer;
 						}
-						
-//						institutionname = boxname;
-//						System.out.println((char)27 + "[33mWTo which institution does this box belong? [" + institutionname + "]"  + (char)27 + "[39m");
-//						currentAnswer = userAnswer.nextLine();
-//						if (!currentAnswer.isEmpty()) {
-//							institutionname = currentAnswer;
-//						}
-						
+
+						//						institutionname = boxname;
+						//						System.out.println((char)27 + "[33mWTo which institution does this box belong? [" + institutionname + "]"  + (char)27 + "[39m");
+						//						currentAnswer = userAnswer.nextLine();
+						//						if (!currentAnswer.isEmpty()) {
+						//							institutionname = currentAnswer;
+						//						}
+
 
 						System.out.println("Please wait, the database is being updated with LOCKSS box data from " + boxname + " ...");
 						// update postgres accordingly
 						dsws.setBoxInfo(1, boxIpAddress, username, password, latitude, longitude, country, boxname);
+						dsws.loadDaemonStatus(1, boxIpAddress);
 
 						pivotTableRequest =  pivotTableRequest + " MAX(CASE WHEN lockss_box_info.name = '" + boxname +"' THEN recent_poll_agreement END) AS \\\\\"" + boxname + "\\\\\" ,"; 
 
 						System.out.println("****************************************************************");
+
+						System.out.println("Creating dashboard for LOCKSS box " + boxname);
+						File dir = new File("/opt/provisioning/dashboards/boxes/");
+
+						// create box directory if it does not exist
+						dir.mkdirs();
+
+						// replace LOCKSS_BOX_NAME -> boxname in Grafana LOCKSS Box template file
+						String lockssBoxContents = lockssBoxTemplateContents.replaceAll("LOCKSS_BOX_NAME", boxname);
+
+						FileWriter writer = new FileWriter("/opt/provisioning/dashboards/boxes/"+ boxname.replaceAll("\\W+", "")  +".json");
+						writer.append(lockssBoxContents);
+						writer.flush();
+						writer.close();
+
 					}
 
 					pivotTableRequest = pivotTableRequest.substring(0, pivotTableRequest.length() - 2) + " from plnmonitor.au_current inner join plnmonitor.lockss_box_info on au_current.box=lockss_box_info.box GROUP BY 1 ORDER BY 1";
 
-
+					System.out.println("Creating global network dashboard");
 					//Replacing the pivot request line with box info
-					fileContents = fileContents.replaceAll("PIVOTRAWSQLREQUEST", pivotTableRequest);
+					dahsboardTemplateContents = dahsboardTemplateContents.replaceAll("PIVOTRAWSQLREQUEST", pivotTableRequest);
 					//instantiating the FileWriter class
-					FileWriter writer = new FileWriter("/opt/provisioning/dashboards/plnmonitor/dashboard.json");
-					writer.append(fileContents);
+					FileWriter writer = new FileWriter("/opt/provisioning/dashboards/dashboard.json");
+					writer.append(dahsboardTemplateContents);
 					writer.flush();
+					writer.close();
+
+					// Creation of one dashboard per TDB publisher
+					// LOCKSS_TDB_PUBLISHER_NAME
+					System.out.println("Creating TDB publisher dashboards");
+
+					File dir = new File("/opt/provisioning/dashboards/tdb_publishers/");
+
+					// create box directory if it does not exist
+					dir.mkdirs();
+
+
+					// Collect TDB publisher names from database
+
+					System.out.println("Loading TDB publishers from database");
+					List<String> tdbPublishers = dsws.getTdbPublishers(1);
+
+					System.out.println("\n\n" + tdbPublishers.size() + " TDB Publishers available");
+
+					for (String tdbPublisher : tdbPublishers) {
+
+
+						// replace LOCKSS_BOX_NAME -> boxname in Grafana LOCKSS Box template file
+						if ((tdbPublisher != null) && (tdbPublisher.length()!=0)) {
+							System.out.println("Creating dashboard for TDB Publisher: " + tdbPublisher);
+							String tdbPublisherContents = tdbPublisherTemplateContents.replaceAll("LOCKSS_TDB_PUBLISHER_NAME", tdbPublisher);
+
+							FileWriter dirWriter = new FileWriter(dir + tdbPublisher.replaceAll("\\W+", "")  +".json");
+							dirWriter.append(tdbPublisherContents);
+							dirWriter.flush();
+							dirWriter.close();
+						}
+					}
 
 
 					System.out.println("Setting administrator credentials for webapp");
