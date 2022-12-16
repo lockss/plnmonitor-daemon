@@ -4,6 +4,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
 import java.net.URL;
+import java.net.URLConnection;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,6 +17,9 @@ import javax.xml.parsers.DocumentBuilderFactory;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The Class plnmonitordaemon-service
@@ -31,7 +35,8 @@ import org.w3c.dom.Node;
  */
 public class plnmonitordaemon {
 
-
+	private static Logger LOGGER = LoggerFactory.getLogger(plnmonitordaemon.class);
+	
 	/**  URL of props server */
 	private static String LOCKSS_PROP_SERVER = "https://lockssadmin.ulb.ac.be/lockss.xml";
 
@@ -90,7 +95,7 @@ public class plnmonitordaemon {
 		// daemon mode (assuming configuration has been set earlier)
 		if ((args == null) || (args.length == 0)) {
 
-			System.out.println("Updating LOCKSS network status..." );
+			LOGGER.info("Updating LOCKSS network status..." );
 			try {
 				dsws = new DaemonStatusWebService(dbConnectionURL, dbUser, dbPassword, dbDriver);
 				HashMap<Integer, String> configFiles = dsws.getPLNConfigurationFiles();
@@ -99,15 +104,15 @@ public class plnmonitordaemon {
 					Integer plnID = entry.getKey();
 					String configFile = entry.getValue();
 
-					System.out.println((char)27 + "[34mLoading lockss.xml configuration file from: " + configFile + (char)27 + "[39m");
+					LOGGER.info((char)27 + "[34mLoading lockss.xml configuration file from: " + configFile + (char)27 + "[39m");
 					List<String> boxIpAddresses = dsws.loadPLNConfiguration(plnID, "pln", configFile);
 					for (String boxIpAddress : boxIpAddresses) {
-						System.out.println((char)27 + "[34mLoading configuration of: " + boxIpAddress);
+						LOGGER.info((char)27 + "[34mLoading configuration of: " + boxIpAddress);
 						dsws.loadDaemonStatus(plnID, boxIpAddress);
 					}
 				}
 			} catch (Exception e) {
-				e.printStackTrace();
+				LOGGER.error(e.getMessage());
 			}
 		}
 
@@ -218,8 +223,8 @@ public class plnmonitordaemon {
 
 						System.out.println("Getting most likely lockss box location :");	
 
-						String geourl = " https://freegeoip.app/xml/"+ boxIpAddress;
-
+						String geourl = " https://freegeoip.live/xml/"+ boxIpAddress;
+						
 						String boxname = "ULB";
 						String longitude = "4.383539";
 						String latitude = "50.810061";
@@ -227,13 +232,19 @@ public class plnmonitordaemon {
 						String city = "Brussels";
 						//String institutionname = "ULB";
 
-
-						DocumentBuilderFactory factory = DocumentBuilderFactory.newInstance();
-						factory.setNamespaceAware(true);
+						
+						
+				
+						DocumentBuilderFactory geofactory = DocumentBuilderFactory.newInstance();
+						geofactory.setNamespaceAware(true);
 						try{
-							DocumentBuilder db = factory.newDocumentBuilder();
+							URL connection = new URL(geourl);
+							URLConnection con = connection.openConnection();
+							con.setRequestProperty("User-Agent", "Mozilla/5.0 (Windows NT 6.1; WOW64) AppleWebKit/537.11 (KHTML, like Gecko) Chrome/23.0.1271.95 Safari/537.11");
+							System.setProperty("http.agent", "Chrome");
+							DocumentBuilder db = geofactory.newDocumentBuilder();
 
-							Document doc = db.parse(new URL(geourl).openStream());
+							Document doc = db.parse(con.getInputStream());
 							doc.getDocumentElement().normalize();
 							Element response = doc.getDocumentElement();
 

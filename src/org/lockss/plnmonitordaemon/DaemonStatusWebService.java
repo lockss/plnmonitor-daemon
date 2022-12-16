@@ -43,6 +43,10 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.mindrot.jbcrypt.BCrypt;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+
 /**
  * The Class DaemonStatusWebService.
  * 
@@ -66,6 +70,7 @@ import org.mindrot.jbcrypt.BCrypt;
  */
 public class DaemonStatusWebService {
 
+	private static Logger LOGGER = LoggerFactory.getLogger(DaemonStatusWebService.class);
 
 	//TODO: use protocol from the database for specific box
 	/** The Constant prefixDSS. Http prefix for Daemon Status Web Service URL*/
@@ -134,10 +139,10 @@ public class DaemonStatusWebService {
 			}
 
 		} catch (Exception e) {
-			System.out.println("Please check that the database is running and/or plnmonitor has been properly configured:");
-			System.out.println("$ java -jar plnmonitor-daemon.jar config");
+			LOGGER.error("Please check that the database is running and/or plnmonitor has been properly configured:");
+			LOGGER.error("$ java -jar plnmonitor-daemon.jar config");
 
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 		} finally {
 			if (dbConnection != null) {
 				dbConnection.close();
@@ -195,7 +200,7 @@ public class DaemonStatusWebService {
 			ResultSet rs=preparedStatement.executeQuery();
 
 		} catch (SQLException e) {
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 
 		} finally {
 			if (preparedStatement != null) {
@@ -225,7 +230,7 @@ public class DaemonStatusWebService {
 					if (eElement.getAttribute("name").contains("id.initialV3PeerList")) {
 						NodeList valuesList = eElement.getElementsByTagName("value");
 						for (int i=0; i<valuesList.getLength(); i++) {
-							System.out.println("Value : " + valuesList.item(i).getTextContent());
+							LOGGER.info("Value : " + valuesList.item(i).getTextContent());
 							Pattern p = Pattern.compile(IPV4_PATTERN);
 							Matcher m = p.matcher(valuesList.item(i).getTextContent());
 							while (m.find()) {
@@ -238,7 +243,7 @@ public class DaemonStatusWebService {
 
 		}
 		catch(Exception e){
-			System.out.println(e.toString());
+			LOGGER.error(e.toString());
 		}
 		return (plnMembers);
 	}
@@ -285,8 +290,8 @@ public class DaemonStatusWebService {
 			}
 
 			catch (WebServiceException e) {
-				System.out.println("Can't connect to the LOCKSS box " + boxHostname);
-				System.out.println("*** Please check the LOCKSS box firewall settings and LOCKSS UI access control.");
+				LOGGER.error("Can't connect to the LOCKSS box " + boxHostname);
+				LOGGER.error("*** Please check the LOCKSS box firewall settings and LOCKSS UI access control.");
 			}
 
 			try {
@@ -296,7 +301,7 @@ public class DaemonStatusWebService {
 				}
 			}
 			catch (WebServiceException e) {
-				System.out.println(e.toString());
+				LOGGER.error(e.toString());
 			}
 
 			// if data from platform configuration is available, update the LOCKSS box table accordingly in the database
@@ -330,7 +335,7 @@ public class DaemonStatusWebService {
 
 
 				} catch (SQLException e)  {
-					System.out.println(e.getMessage());
+					LOGGER.error(e.getMessage());
 
 				} finally {
 					if (preparedStatement != null) {
@@ -343,7 +348,7 @@ public class DaemonStatusWebService {
 			}
 		}
 		catch (Exception e) {
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 		}
 		return boxInfo;
 	}
@@ -393,8 +398,8 @@ public class DaemonStatusWebService {
 			}
 
 			catch (WebServiceException e) {
-				System.out.println(e.toString());
-				System.out.println((char)27 + "[31mCan't connect to the LOCKSS box " + boxHostname + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control" + (char)27 + "[39m");
+				LOGGER.error(e.toString());
+				LOGGER.error((char)27 + "[31mCan't connect to the LOCKSS box " + boxHostname + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control" + (char)27 + "[39m");
 			}
 
 			try {
@@ -404,7 +409,7 @@ public class DaemonStatusWebService {
 				}
 			}
 			catch (WebServiceException e) {
-				System.out.println(e.toString());
+				LOGGER.error(e.toString());
 			}
 
 			// if data from platform configuration is available, update the LOCKSS box table accordingly in the database
@@ -473,7 +478,7 @@ public class DaemonStatusWebService {
 					if (rs.next()) {
 						boxId = rs.getInt("id");
 					}
-					System.out.println("Entry for pln: "+ plnID + " with IP address "+boxIpAddress + " ----- " + boxConfiguration.getIpAddress() + "V3 identity:" +  boxConfiguration.getV3Identity() + " is inserted/updated into LOCKSS_BOX table at position "+ boxId);
+					LOGGER.info("Entry for pln: "+ plnID + " with IP address "+boxIpAddress + " ----- " + boxConfiguration.getIpAddress() + "V3 identity:" +  boxConfiguration.getV3Identity() + " is inserted/updated into LOCKSS_BOX table at position "+ boxId);
 
 
 
@@ -526,7 +531,7 @@ public class DaemonStatusWebService {
 					}
 
 				} catch (SQLException e) {
-					System.out.println(e.getMessage());
+					LOGGER.error(e.getMessage());
 
 				} finally {
 					if (preparedStatement != null) {
@@ -592,7 +597,7 @@ public class DaemonStatusWebService {
 
 
 				} catch (SQLException e)  {
-					System.out.println(e.getMessage());
+					LOGGER.error(e.getMessage());
 
 				} finally {
 					if (preparedStatement != null) {
@@ -604,7 +609,7 @@ public class DaemonStatusWebService {
 				}
 		}
 		catch (Exception e) {
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 		}
 		return tdbPublishers;
 	}
@@ -659,7 +664,7 @@ public class DaemonStatusWebService {
 				} 
 			}
 			catch (SQLException e) {
-				System.out.println(e.getMessage());
+				LOGGER.error(e.getMessage());
 			} finally {
 				if (dbConnection != null) {
 					dbConnection.close();
@@ -686,30 +691,31 @@ public class DaemonStatusWebService {
 			}
 
 			catch (WebServiceException e) {
-				System.out.println(e.toString());
-				System.out.println("\u001B[31m Nothing to do connection unavailable... \u001B[0m");
+				LOGGER.error(e.toString());
+				LOGGER.error("\u001B[31m Nothing to do connection unavailable... \u001B[0m");
 			}
 
 			try {
 				if (service != null) {  //if service available, get all data from the LOCKSS box
 					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
-					System.out.println("\u001B[32m Getting platform configuration...\u001B[0m");
+					LOGGER.info("\u001B[32m Getting platform configuration...\u001B[0m");
 					boxConfiguration = dss.getPlatformConfiguration();
-					System.out.println("\u001B[32m Getting repository spaces status...\u001B[0m");
+					LOGGER.info("\u001B[32m Getting repository spaces status...\u001B[0m");
 					repositoryBox = dss.queryRepositorySpaces("select *");
-					System.out.println("\u001B[32m Getting AUs status... \u001B[0m");
+					LOGGER.info("\u001B[32m Getting AUs status... \u001B[0m");
 					ausFromCurrentBox = dss.queryAus(QUERY);
-					System.out.println("\u001B[32m Getting peers status...\u001B[0m");
+					
+					LOGGER.info("\u001B[32m Getting peers status...\u001B[0m");
 					peersBox = dss.queryPeers("select *");
-					System.out.println("\u001B[32m Getting repository status...\u001B[0m");
+					LOGGER.info("\u001B[32m Getting repository status...\u001B[0m");
 					repo = dss.queryRepositories("select *");
 				}
 			}
 			catch (WebServiceException e) {
-				System.out.println(e.toString());
+				LOGGER.error(e.toString());
 			}
 
-			System.out.println("\u001B[32m Updating LOCKSS boxes configurations in the database \u001B[0m");
+			LOGGER.info("\u001B[32m Updating LOCKSS boxes configurations in the database \u001B[0m");
 			// if data from plaftorm configuration is available, update the LOCKSS box table accordingly in the database
 			if (boxConfiguration!=null){
 				//update LOCKSS box config in the LOCKSS_box database
@@ -776,10 +782,10 @@ public class DaemonStatusWebService {
 					if (rs.next()) {
 						boxId = rs.getInt("id");
 					}
-					System.out.println("Entry for pln: "+ plnID + " with IP address "+boxIpAddress + " ----- " + boxConfiguration.getIpAddress() + "V3 identity:" +  boxConfiguration.getV3Identity() + " is inserted/updated into LOCKSS_BOX table at position "+ boxId);
+					LOGGER.info("Entry for pln: "+ plnID + " with IP address "+boxIpAddress + " ----- " + boxConfiguration.getIpAddress() + "V3 identity:" +  boxConfiguration.getV3Identity() + " is inserted/updated into LOCKSS_BOX table at position "+ boxId);
 
 				} catch (SQLException e) {
-					System.out.println(e.getMessage());
+					LOGGER.error(e.getMessage());
 
 				} finally {
 					if (preparedStatement != null) {
@@ -795,7 +801,7 @@ public class DaemonStatusWebService {
 			// if repository box data is collected for the current LOCKSS Box identified by box id and repository_space_lockss_id
 			// insert the results in the table lockss_box_data_current
 
-			System.out.println("\u001B[32m Updating LOCKSS boxes respository space in the database... \u001B[0m");
+			LOGGER.info("\u001B[32m Updating LOCKSS boxes respository space in the database... \u001B[0m");
 
 			if (repositoryBox != null) {
 				for (RepositorySpaceWsResult currentBoxResult : repositoryBox) {
@@ -840,14 +846,14 @@ public class DaemonStatusWebService {
 						preparedStatement.setLong(19,currentBoxResult.getInactiveCount());
 						preparedStatement.setLong(20, currentBoxResult.getOrphanedCount());
 
-						System.out.println(preparedStatement.toString());
+						//System.out.println(preparedStatement.toString());
 						preparedStatement.executeUpdate();
 
-						System.out.println("Record is inserted and updated into database table LOCKSS_box_data_current for boxId" + boxId + " Repository Id: " + currentBoxResult.getRepositorySpaceId());
+						//LOGGER.info("Record is inserted and updated into database table LOCKSS_box_data_current for boxId" + boxId + " Repository Id: " + currentBoxResult.getRepositorySpaceId());
 
 					} catch (SQLException e) {
 
-						System.out.println(e.getMessage());
+						LOGGER.error(e.getMessage());
 
 					} finally {
 
@@ -865,7 +871,7 @@ public class DaemonStatusWebService {
 
 
 				// if peers box data is collected from the LOCKSS Box, insert the results in the table Peers
-				System.out.println("\u001B[32m Updating peers status in the database... \u001B[0m");
+				LOGGER.info("\u001B[32m Updating peers status in the database... \u001B[0m");
 
 				if (peersBox != null) {
 
@@ -924,14 +930,14 @@ public class DaemonStatusWebService {
 							preparedStatement.setLong(26, currentPeer.getVotesCast() );
 							//preparedStatement.setInt(28, currentPeer.getPeerId().hashCode() );
 
-							System.out.println(preparedStatement.toString());
+							//System.out.println(preparedStatement.toString());
 							preparedStatement.executeUpdate();
 
-							System.out.println("Record is inserted into Peers table!");
+							//LOGGER.info("Record is inserted into Peers table!");
 
 						} catch (SQLException e) {
 
-							System.out.println(e.getMessage());
+							LOGGER.error(e.getMessage());
 
 						} finally {
 
@@ -947,7 +953,7 @@ public class DaemonStatusWebService {
 					}
 
 					// if AUs box data is collected from the LOCKSS Box, insert the results in the table AU_current
-					System.out.println("\u001B[32m Updating AU status in the database... \u001B[0m");
+					LOGGER.info("\u001B[32m Updating AU status in the database... \u001B[0m");
 
 					if (ausFromCurrentBox != null) {
 						for (AuWsResult currentAU :  ausFromCurrentBox) {
@@ -1046,12 +1052,12 @@ public class DaemonStatusWebService {
 								preparedStatement.setBoolean(54, currentAU.getAvailableFromPublisher());
 
 								preparedStatement.executeUpdate();
+								//LOGGER.info(preparedStatement.toString());
+								//LOGGER.info("Record "+ currentAU.getName() + " is inserted into AU_current table.");
 
-								System.out.println("Record "+ currentAU.getName() + " is inserted into AU_current table.");
+							} catch (Exception e) {
 
-							} catch (SQLException e) {
-
-								System.out.println(e.getMessage());
+								LOGGER.error(e.getMessage());
 
 							} finally {
 
@@ -1068,7 +1074,7 @@ public class DaemonStatusWebService {
 					}
 
 					// if AUs box data is collected from the LOCKSS Box, insert the results in the table AU_current
-					System.out.println("\u001B[32m Updating AU summary status in the database... \u001B[0m");
+					LOGGER.info("\u001B[32m Updating AU summary status in the database... \u001B[0m");
 
 					
 					// select distinct(tdb_publisher) from au_current; 
@@ -1157,7 +1163,7 @@ public class DaemonStatusWebService {
 						}
 
 					} catch (SQLException e)  {
-						System.out.println(e.getMessage());
+						LOGGER.error(e.getMessage());
 
 					} finally {
 						if (preparedStatement != null) {
@@ -1230,16 +1236,16 @@ public class DaemonStatusWebService {
 			preparedStatement.setString(5, pwHash);
 			preparedStatement.setString(6, role);
 
-			System.out.println(preparedStatement.toString());
+			//System.out.println(preparedStatement.toString());
 			ResultSet rs=preparedStatement.executeQuery();
 			if (rs.next()) {
 				userId = rs.getInt("id");
-				System.out.println("Added or updated user: " + username + " to the database with ID: " + userId + " " + pwHash  );
+				LOGGER.info("Added or updated user: " + username + " to the database with ID: " + userId + " " + pwHash  );
 			}
 		}
 		catch (SQLException e) {
 
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 
 		} 
 
@@ -1255,7 +1261,7 @@ public class DaemonStatusWebService {
 			}
 			catch (SQLException e) {
 
-				System.out.println(e.getMessage());
+				LOGGER.error(e.getMessage());
 
 			}
 
@@ -1279,7 +1285,7 @@ public class DaemonStatusWebService {
 
 		} catch (ClassNotFoundException e) {
 
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 
 		}
 
@@ -1290,7 +1296,7 @@ public class DaemonStatusWebService {
 
 		} catch (SQLException e) {
 
-			System.out.println(e.getMessage());
+			LOGGER.error(e.getMessage());
 
 		}
 
@@ -1335,7 +1341,7 @@ public class DaemonStatusWebService {
 	 * @param server the server
 	 * @throws Exception the exception
 	 */
-	private void formAuthenticate(String server ) throws Exception{
+	private void formAuthenticate(String server) throws Exception{
 		CredentialsProvider credsProvider = new BasicCredentialsProvider();
 		credsProvider.setCredentials(
 				new AuthScope(server, 8081),
@@ -1346,12 +1352,12 @@ public class DaemonStatusWebService {
 		try {
 			HttpGet httpget = new HttpGet("https://"+ server +":8081/Home");
 
-			System.out.println("Executing request " + httpget.getRequestLine());
+			LOGGER.info("Executing request " + httpget.getRequestLine());
 			CloseableHttpResponse response = httpclient.execute(httpget);
 			try {
-				System.out.println("----------------------------------------");
-				System.out.println(response.getStatusLine());
-				System.out.println(EntityUtils.toString(response.getEntity()));
+				LOGGER.info("----------------------------------------");
+				LOGGER.info(response.getStatusLine().toString());
+				LOGGER.info(EntityUtils.toString(response.getEntity()));
 			} finally {
 				response.close();
 			}
