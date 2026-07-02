@@ -1,10 +1,13 @@
 package org.lockss.plnmonitordaemon;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.FileWriter;
+import java.io.InputStream;
 import java.net.URL;
 import java.net.URLConnection;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -13,13 +16,13 @@ import java.util.Scanner;
 import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 //import org.lockss.plnmonitordaemon.DaemonStatusWebService;
 import org.w3c.dom.Document;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
-
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.yaml.snakeyaml.Yaml;
 
 /**
  * The Class plnmonitordaemon-service
@@ -62,10 +65,10 @@ public class plnmonitordaemon {
 	private static String dbConnectionURL = "jdbc:postgresql://plnmonitordb:5432/plnmonitor";
 
 	/** boxUsername. Default daemon UI user name for user with debug info access only (read) for all lockss boxes in the network (8081)*/
-	private static String boxUsername = "debug";
+	private static String boxUsername = "admin"; //"debug";
 
 	/** boxPassword. Default daemon UI password for user with debug info access only (read) for all lockss boxes in the network (8081)*/
-	private static String boxPassword = "debuglockss";	
+	private static String boxPassword = "admin";//"debuglockss";	
 	
 	/** Dashboard templates path */
 	private static String dashboardTemplatePath = "/opt/template/dashboard_template.json";
@@ -77,7 +80,8 @@ public class plnmonitordaemon {
 	private static String boxProvisioningPath = dashboardProvisioningPath + "boxes/";
 	private static String tdbPublisherProvisioningPath =  dashboardProvisioningPath + "tdb_publishers/";
 		
-
+	/** configuration file path */
+	private static String configFilePath = "/opt/config/lockssdashboard_config.yml";
 	
 	/**
 	 * The main method.
@@ -86,9 +90,9 @@ public class plnmonitordaemon {
 	 */
 	public static void main(String[] args) {
 
-		//Instantiating the File class
 
-
+		Yaml yamlConfigFile = null;
+		Map<String, Map<String, Object>> configFromFile = null;
 
 		DaemonStatusWebService dsws = null;
 
@@ -98,15 +102,16 @@ public class plnmonitordaemon {
 			LOGGER.info("Updating LOCKSS network status..." );
 			try {
 				dsws = new DaemonStatusWebService(dbConnectionURL, dbUser, dbPassword, dbDriver);
-				HashMap<Integer, String> configFiles = dsws.getPLNConfigurationFiles();
-				System.out.println(configFiles.values());
-				for (Map.Entry<Integer, String> entry : configFiles.entrySet()) {
+				HashMap<Integer, String> propServerURLs = dsws.getPLNConfigurationFiles();
+				
+				for (Map.Entry<Integer, String> entry : propServerURLs.entrySet()) {
 					Integer plnID = entry.getKey();
-					String configFile = entry.getValue();
+					String propServerURL = entry.getValue();
 
-					LOGGER.info((char)27 + "[34mLoading lockss.xml configuration file from: " + configFile + (char)27 + "[39m");
-					List<String> boxIpAddresses = dsws.loadPLNConfiguration(plnID, "pln", configFile);
+					LOGGER.info((char)27 + "[34mLoading lockss.xml configuration file from: " + propServerURL + (char)27 + "[39m");
+					List<String> boxIpAddresses = dsws.loadPLNConfiguration(plnID, "pln", propServerURL);
 					for (String boxIpAddress : boxIpAddresses) {
+						
 						LOGGER.info((char)27 + "[34mLoading configuration of: " + boxIpAddress);
 						dsws.loadDaemonStatus(plnID, boxIpAddress);
 					}
@@ -116,17 +121,60 @@ public class plnmonitordaemon {
 			}
 		}
 
+			
 		// config mode (setting daemon configuration)
-		//TODO: record configuration in the config file
-		else if ((args.length == 1) && (args[0].compareTo("config")==0 )  ) {
+		else if (args[0].matches("config") )   {
+			
+			if(args.length > 2 && args[1].matches("-toFile") ) {
+				String saveFileName=args[2];
+				
+				System.out.println("Saving configuration to file: " + saveFileName);
+				
+				
+				
+			}
+			
+			// if config yaml file is provided 
+			else if (args.length > 1  && args[1].matches("-fromFile") ) {
+				System.out.println("Found configuration file: " + configFilePath);
+				try {
+					FileInputStream inputStream = new FileInputStream(configFilePath);
+					yamlConfigFile = new Yaml();
 
+		             configFromFile = yamlConfigFile.load(inputStream);
 
+		            // Iterate over the entries in the "lockssboxes" section
+		            for (Map.Entry<String, Object> entry : configFromFile.get("lockssboxes").entrySet()) {
+		                String boxName = entry.getKey();
+		                Map<String, Object> boxProperties = (Map<String, Object>)entry.getValue();
+
+		                // Print individual properties for each entry
+		                System.out.println("Box Name: " + boxName);
+		                System.out.println("IP: " + boxProperties.get("ip"));
+		                
+		                System.out.println("UI Port: " + boxProperties.get("uiport"));
+		                System.out.println("Latitude: " + boxProperties.get("latitude"));
+		                System.out.println("Longitude: " + boxProperties.get("longitude"));
+		                System.out.println("Country: " + boxProperties.get("country"));
+		                System.out.println("Username: " + boxProperties.get("username"));
+		                System.out.println("Password: " + boxProperties.get("password"));		                
+		            }
+
+		        } catch (Exception e) {
+		            e.printStackTrace();
+		        }	
+			}
+			
+			else {
+				System.out.println("Missing config file : switching to manual configuration");
+			}
+							
 			// As Pivot is not available in Postgres, we need to set the column names in the SQL query performed by the dashboard
 			// This is replacing the "PIVOTRAWSQLREQUEST" tag in the Grafana dashboard template
 
 			// First part of the SQL query string
 			String pivotTableRequest = "select au_current.name, ";
-
+			String contentSizePivotTableRequest = "select au_current.name, ";
 
 			System.out.println((char)27 + "[34mSetting up PLN dashboard based on Grafana"  + (char)27 + "[39m");
 
@@ -210,31 +258,46 @@ public class plnmonitordaemon {
 				try {
 					dbConnectionURL = "jdbc:postgresql://" + dbIP + ":" + dbPort + "/" + dbName;
 					dsws = new DaemonStatusWebService(dbConnectionURL, dbUser, dbPassword, dbDriver);
+					List<String> boxIpAddresses;
+					
+					if(configFromFile != null) {
+						// get IPaddresses from config file 
+					    
+						 boxIpAddresses = new ArrayList<String>();
+						 for (Map.Entry<String, Object> entry : configFromFile.get("lockssboxes").entrySet()) {
+						      Map<String, Object> boxProperties = (Map<String, Object>) entry.getValue();
 
-					// collect lockss_box info from user input
+						        // Get and add IP address to the list
+						        String ipAddress = (String) boxProperties.get("ip");
+						        boxIpAddresses.add(ipAddress);
+						  }
+						
+						}
+					else { 
+				    	// no config file provided - collect lockss_box info from user input
+							System.out.println("No config file specified - loading lockss.xml configuration file from: " + LOCKSS_PROP_SERVER);
+							boxIpAddresses = dsws.loadPLNConfiguration(1, "pln", LOCKSS_PROP_SERVER);
 
-					System.out.println("Loading lockss.xml configuration file from: " + LOCKSS_PROP_SERVER);
-					List<String> boxIpAddresses = dsws.loadPLNConfiguration(1, "pln", LOCKSS_PROP_SERVER);
+							System.out.println("\n\n" + boxIpAddresses.size() + " LOCKSS boxes detected in your network");
 
-					System.out.println("\n\n" + boxIpAddresses.size() + " LOCKSS boxes detected in your network");
+					}
 
 					for (String boxIpAddress : boxIpAddresses) {
 						System.out.println("\n\n" + (char)27 + "[36mSetting configuration of: " + boxIpAddress + (char)27 + "[39m");
 
 						System.out.println("Getting most likely lockss box location :");	
 
-						String geourl = " https://freegeoip.live/xml/"+ boxIpAddress;
+						String geourl = "https://reallyfreegeoip.org/xml/"+ boxIpAddress;
 						
+						// default values
 						String boxname = "ULB";
 						String longitude = "4.383539";
 						String latitude = "50.810061";
 						String country = "Belgium";
 						String city = "Brussels";
-						//String institutionname = "ULB";
-
+						String boxUIPort = "8081";
+			
 						
-						
-				
 						DocumentBuilderFactory geofactory = DocumentBuilderFactory.newInstance();
 						geofactory.setNamespaceAware(true);
 						try{
@@ -279,15 +342,20 @@ public class plnmonitordaemon {
 						if (!currentAnswer.isEmpty()) {
 							password = currentAnswer;
 						}
+						
+						System.out.println("LOCKSS box UI port: [" + boxUIPort + "]");
+						currentAnswer = userAnswer.nextLine();
+						if (!currentAnswer.isEmpty()) {
+							boxUIPort = currentAnswer;
+						}
+						
 
 						System.out.println("\n\n" + (char)27 + "[33mTrying to load the current configuration of: " + boxIpAddress + " - Please wait." + (char)27 + "[39m");
 
-						// get current config info from box
-						HashMap <String, String> boxInfo = dsws.getBoxInfo(1, boxIpAddress, username, password);
+						// get current config info from database
+						HashMap <String, String> boxInfo = dsws.getBoxInfo(1, boxIpAddress, boxUIPort, username, password);
 
 						if (boxInfo != null) {
-							username = boxInfo.get("username");
-							password = boxInfo.get("password");
 							longitude = boxInfo.get("longitude");
 							latitude = boxInfo.get("latitude");
 							country = boxInfo.get("country");
@@ -330,7 +398,7 @@ public class plnmonitordaemon {
 							else {
 								try {
 									Double.parseDouble(currentAnswer);
-									latitude = currentAnswer;
+									longitude = currentAnswer;
 									break;
 								} 
 								catch (NumberFormatException e) {
@@ -361,10 +429,11 @@ public class plnmonitordaemon {
 
 						System.out.println("Please wait, the database is being updated with LOCKSS box data from " + boxname + " ...");
 						// update postgres accordingly
-						dsws.setBoxInfo(1, boxIpAddress, username, password, latitude, longitude, country, boxname);
+						dsws.setBoxInfo(1, boxIpAddress, boxUIPort, username, password, latitude, longitude, country, boxname);
 						dsws.loadDaemonStatus(1, boxIpAddress);
 
 						pivotTableRequest =  pivotTableRequest + " MAX(CASE WHEN lockss_box_info.name = '" + boxname +"' THEN recent_poll_agreement END) AS \\\\\"" + boxname + "\\\\\" ,"; 
+						contentSizePivotTableRequest =  contentSizePivotTableRequest + " MAX(CASE WHEN lockss_box_info.name = '" + boxname +"' THEN content_size END) AS \\\\\"" + boxname + "\\\\\" ,"; 
 
 						System.out.println("****************************************************************");
 
@@ -385,10 +454,12 @@ public class plnmonitordaemon {
 					}
 
 					pivotTableRequest = pivotTableRequest.substring(0, pivotTableRequest.length() - 2) + " from plnmonitor.au_current inner join plnmonitor.lockss_box_info on au_current.box=lockss_box_info.box GROUP BY 1 ORDER BY 1";
+					contentSizePivotTableRequest = contentSizePivotTableRequest.substring(0, contentSizePivotTableRequest.length() - 2) + " from plnmonitor.au_current inner join plnmonitor.lockss_box_info on au_current.box=lockss_box_info.box GROUP BY 1 ORDER BY 1";
 
 					System.out.println("Creating global network dashboard");
 					//Replacing the pivot request line with box info
-					dahsboardTemplateContents = dahsboardTemplateContents.replaceAll("PIVOTRAWSQLREQUEST", pivotTableRequest);
+					dahsboardTemplateContents = dahsboardTemplateContents.replaceAll("AUAGREEMENTPIVOTRAWSQLREQUEST", pivotTableRequest);
+					dahsboardTemplateContents = dahsboardTemplateContents.replaceAll("AUSIZEPIVOTRAWSQLREQUEST", contentSizePivotTableRequest);
 					//instantiating the FileWriter class
 					FileWriter writer = new FileWriter(dashboardProvisioningPath + "dashboard.json");
 					writer.append(dahsboardTemplateContents);
@@ -427,23 +498,23 @@ public class plnmonitordaemon {
 					}
 
 
-					System.out.println("Setting administrator credentials for webapp");
-
-					String adminname = "admin"; 
-					String adminpassword = "admin";
-					System.out.println("\n\n" + (char)27 + "[33mPlease provide the admin username: [" + adminname + "]"  + (char)27 + "[39m");
-					currentAnswer = userAnswer.nextLine();
-					if (!currentAnswer.isEmpty()) {
-						adminname = currentAnswer;
-					}
-					System.out.println((char)27 + "[33mPlease provide the admin password: [" + adminpassword + "]"  + (char)27 + "[39m");
-					currentAnswer = userAnswer.nextLine();
-					if (!currentAnswer.isEmpty()) {
-						adminname = currentAnswer;
-					}
-
-
-					dsws.setCredentials(adminname, "ADMIN", adminpassword);
+//					System.out.println("Setting administrator credentials for webapp");
+//
+//					String adminname = "admin"; 
+//					String adminpassword = "admin";
+//					System.out.println("\n\n" + (char)27 + "[33mPlease provide the admin username: [" + adminname + "]"  + (char)27 + "[39m");
+//					currentAnswer = userAnswer.nextLine();
+//					if (!currentAnswer.isEmpty()) {
+//						adminname = currentAnswer;
+//					}
+//					System.out.println((char)27 + "[33mPlease provide the admin password: [" + adminpassword + "]"  + (char)27 + "[39m");
+//					currentAnswer = userAnswer.nextLine();
+//					if (!currentAnswer.isEmpty()) {
+//						adminname = currentAnswer;
+//					}
+//
+//
+//					dsws.setCredentials(adminname, "ADMIN", adminpassword);
 
 					System.out.println("\n\nplnmonitor is ready to run");
 					System.out.println((char)27 + "[32mYou can now launch plnmonitor by executing ./start.sh"  + (char)27 + "[39m");
@@ -458,10 +529,17 @@ public class plnmonitordaemon {
 				System.out.println("Can't find dashboard_template.json file in the template directory");
 				e1.printStackTrace();
 			}
-
+		
+		
+			   
+		}
+		
+		else if ((args.length == 1) && (args[0].compareTo("buildfromdb")==0)) {	
+			
+			   
 		}
 		else {
-			System.out.println("Usage: \'java -jar plnmonitor-daemon-service config\' to configure or \\'java -jar plnmonitordaemon\\' to run");
+			System.out.println("Usage: \'java -jar plnmonitor-daemon config\' to configure or \\ \\'java -jar plnmonitor-daemon yamlconfig\\' to configure with yaml file  or \\'java -jar plnmonitordaemon\\' to run");
 		}
 
 

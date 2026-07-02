@@ -22,15 +22,7 @@ import javax.xml.parsers.DocumentBuilder;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.ws.Service;
 import javax.xml.ws.WebServiceException;
-import org.apache.http.auth.AuthScope;
-import org.apache.http.auth.UsernamePasswordCredentials;
-import org.apache.http.client.CredentialsProvider;
-import org.apache.http.client.methods.CloseableHttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.impl.client.BasicCredentialsProvider;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
-import org.apache.http.util.EntityUtils;
+import javax.xml.ws.BindingProvider;
 import org.lockss.ws.entities.AuWsResult;
 import org.lockss.ws.entities.PeerWsResult;
 import org.lockss.ws.entities.PlatformConfigurationWsResult;
@@ -72,17 +64,12 @@ public class DaemonStatusWebService {
 
 	private static Logger LOGGER = LoggerFactory.getLogger(DaemonStatusWebService.class);
 
-	//TODO: use protocol from the database for specific box
 	/** The Constant prefixDSS. Http prefix for Daemon Status Web Service URL*/
 	private static final String prefixDSS = "http://";
 
-	//TODO: use protocol from the database for specific box
-	/** The Constant prefixSDSS. Https prefix for Daemon Status Web Service URL*/
-	private static final String prefixSDSS = "https://";
-
 	//TODO: use DSS parameters from the database for specific box (no hardcoded 8081 port but instead specific to box)
 	/** The Constant postfixDSS. Postfix for Daemon Status Web Service URL */
-	private static final String postfixDSS = ":8081/ws/DaemonStatusService?wsdl";
+	private static final String postfixDSS = "/ws/DaemonStatusService?wsdl";
 
 	/** The Constant TARGET_NAMESPACE. Daemon Status Service namespace  */
 	private static final String TARGET_NAMESPACE = "http://status.ws.lockss.org/";
@@ -102,8 +89,6 @@ public class DaemonStatusWebService {
 	private String dbPassword;
 	private String dbDriver;
 
-	private String username;
-	private String password;
 
 	/**
 	 * DaemonStatusWebService constructor
@@ -141,8 +126,8 @@ public class DaemonStatusWebService {
 		} catch (Exception e) {
 			LOGGER.error("Please check that the database is running and/or plnmonitor has been properly configured:");
 			LOGGER.error("$ java -jar plnmonitor-daemon.jar config");
-
 			LOGGER.error(e.getMessage());
+			
 		} finally {
 			if (dbConnection != null) {
 				dbConnection.close();
@@ -262,7 +247,7 @@ public class DaemonStatusWebService {
 	 * @return plnMembers : the list of box IP addresses in the network 
 	 */
 
-	public HashMap<String, String> getBoxInfo(int plnID, String boxIpAddress, String username, String password) throws SQLException {
+	public HashMap<String, String> getBoxInfo(int plnID, String boxIpAddress, String boxUIPort, String username, String password) throws SQLException {
 		// TODO: check plnID
 
 		HashMap<String, String> boxInfo = null;
@@ -271,32 +256,35 @@ public class DaemonStatusWebService {
 		Service service = null;
 
 		PlatformConfigurationWsResult boxConfiguration = null;
-		Integer boxId=null;
 
 		try {
 			// Call the service and get the results of the query.
 			// Store AUs results for each server in a Hashmap (server name, list of Aus)
 			this.authenticate(username, password); //basic authentication (inline)
 
-			String boxHostname = boxIpAddress;
+			String boxSocketName = boxIpAddress + ":" + boxUIPort;
 
-			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
-
+			String serviceAddress=prefixDSS+boxSocketName+postfixDSS; 
+			
 			try {
 
 				service = Service.create(new URL(serviceAddress), new QName(
 						TARGET_NAMESPACE, SERVICE_NAME));
-
+				
 			}
 
 			catch (WebServiceException e) {
-				LOGGER.error("Can't connect to the LOCKSS box " + boxHostname);
+				LOGGER.error("Can't connect to the LOCKSS box " + boxSocketName);
 				LOGGER.error("*** Please check the LOCKSS box firewall settings and LOCKSS UI access control.");
 			}
 
 			try {
 				if (service != null) {  //if service available, get all data from the LOCKSS box
 					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					BindingProvider prov = (BindingProvider)dss;
+					prov.getRequestContext().put(BindingProvider.USERNAME_PROPERTY, username);
+					prov.getRequestContext().put(BindingProvider.PASSWORD_PROPERTY, password);
+		
 					boxConfiguration = dss.getPlatformConfiguration();
 				}
 			}
@@ -331,6 +319,7 @@ public class DaemonStatusWebService {
 						boxInfo.put("longitude", Double.toString(rs.getDouble("longitude")));
 						boxInfo.put("country", rs.getString("country"));
 						boxInfo.put("boxname", rs.getString("name"));
+						boxInfo.put("uiport", rs.getString("uiport"));
 					}
 
 
@@ -375,7 +364,7 @@ public class DaemonStatusWebService {
 	 * @throws SQLException the SQL exception
 	 */
 
-	public void setBoxInfo(Integer plnID, String boxIpAddress, String username, String password, String latitude, String longitude, String country, String boxname) throws SQLException{
+	public void setBoxInfo(Integer plnID, String boxIpAddress, String boxUIPort, String username, String password, String latitude, String longitude, String country, String boxname) throws SQLException{
 		Connection dbConnection = null;
 		PreparedStatement preparedStatement=null;
 		Service service = null;
@@ -388,9 +377,9 @@ public class DaemonStatusWebService {
 			// Store AUs results for each server in a Hashmap (server name, list of Aus)
 			this.authenticate(username, password); //basic authentication (inline)
 
-			String boxHostname = boxIpAddress;
+			String boxSocketName = boxIpAddress+ ":" + boxUIPort;
 
-			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
+			String serviceAddress=prefixDSS+boxSocketName+postfixDSS; 
 
 			try {
 
@@ -399,12 +388,16 @@ public class DaemonStatusWebService {
 
 			catch (WebServiceException e) {
 				LOGGER.error(e.toString());
-				LOGGER.error((char)27 + "[31mCan't connect to the LOCKSS box " + boxHostname + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control" + (char)27 + "[39m");
+				LOGGER.error((char)27 + "[31mCan't connect to the LOCKSS box " + boxSocketName + ". Please check the LOCKSS box firewall settings and LOCKSS UI access control" + (char)27 + "[39m");
 			}
 
 			try {
 				if (service != null) {  //if service available, get all data from the LOCKSS box
 					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					BindingProvider prov = (BindingProvider)dss;
+					prov.getRequestContext().put(BindingProvider.USERNAME_PROPERTY, username);
+					prov.getRequestContext().put(BindingProvider.PASSWORD_PROPERTY, password);
+
 					boxConfiguration = dss.getPlatformConfiguration();
 				}
 			}
@@ -448,7 +441,7 @@ public class DaemonStatusWebService {
 
 					dbConnection = getDBConnection();
 					preparedStatement = dbConnection.prepareStatement(insertTableSQL, Statement.KEEP_CURRENT_RESULT);
-					preparedStatement.setString(1, "8081");
+					preparedStatement.setString(1, boxUIPort);
 					preparedStatement.setString(2, boxConfiguration.getGroups().get(0).replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(3, boxConfiguration.getV3Identity().replaceAll("\\[|\\]", ""));
 					preparedStatement.setLong(4, boxConfiguration.getUptime());
@@ -463,7 +456,7 @@ public class DaemonStatusWebService {
 					preparedStatement.setInt(12, plnID);
 
 					preparedStatement.setString(13, boxIpAddress);
-					preparedStatement.setString(14, "8081");
+					preparedStatement.setString(14, boxUIPort);
 					preparedStatement.setInt(15, plnID);
 					preparedStatement.setString(16, boxConfiguration.getGroups().get(0).replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(17, boxConfiguration.getV3Identity().replaceAll("\\[|\\]", ""));
@@ -579,8 +572,7 @@ public class DaemonStatusWebService {
 		try {
 			// Call the service and get the results of the query.
 			// Store AUs results for each server in a Hashmap (server name, list of Aus)
-			this.authenticate(username, password); //basic authentication (inline)
-
+			
 			try {
 					String queryTableSQL = "SELECT distinct(tdb_publisher) FROM plnmonitor.au_current"; // WHERE pln=" + plnID;
 
@@ -638,15 +630,18 @@ public class DaemonStatusWebService {
 		PlatformConfigurationWsResult boxConfiguration = null;
 		Integer boxId=null;
 		Map<String, String> headers = null;
+		String username = "admin";
+		String password = "admin";
+		String boxUIPort = "8081"; //default port for LOCKSS 1.x
 
 
 		try {
 
 			// Call the service and get results of the queries.
 
-			// Get credentials from database for current box
+			// Get credentials and port from database for current box
 			try {							
-				String getcredentialsQuery = "SELECT username, password from plnmonitor.lockss_box as box INNER JOIN plnmonitor.lockss_box_info AS info "
+				String getcredentialsQuery = "SELECT username, password, uiport from plnmonitor.lockss_box as box INNER JOIN plnmonitor.lockss_box_info AS info "
 						+ "ON box.id = info.box WHERE box.ipaddress = ? AND box.pln = ?"; // WHERE pln=" + plnID;
 
 				dbConnection = getDBConnection();
@@ -661,6 +656,7 @@ public class DaemonStatusWebService {
 				if (rs.next()) {
 					username = rs.getString("username");
 					password = rs.getString("password");
+					boxUIPort = rs.getString("uiport");
 				} 
 			}
 			catch (SQLException e) {
@@ -671,22 +667,19 @@ public class DaemonStatusWebService {
 				}
 			}
 
-
 			this.authenticate(username, password); //basic authentication (inline)
 
 
-			String boxHostname = boxIpAddress;
+			String socketAddress = boxIpAddress + ":" + boxUIPort;
 
-			//ugly fix for UGent - please ignore this
-			//if (boxIpAddress.matches("157.193.230.142")) {
-			//	boxHostname = "shaw.ugent.be";
-			//}
-			String serviceAddress=prefixDSS+boxHostname+postfixDSS; 
+	
+			String serviceAddress=prefixDSS+socketAddress+postfixDSS; 
 
 			try {
 
 				service = Service.create(new URL(serviceAddress), new QName(
 						TARGET_NAMESPACE, SERVICE_NAME));
+				
 
 			}
 
@@ -698,17 +691,31 @@ public class DaemonStatusWebService {
 			try {
 				if (service != null) {  //if service available, get all data from the LOCKSS box
 					DaemonStatusService dss = service.getPort(DaemonStatusService.class);
+					
+					//BindingProvider prov = (BindingProvider)dss;
+					//prov.getRequestContext().put(BindingProvider.USERNAME_PROPERTY, username);
+					//prov.getRequestContext().put(BindingProvider.PASSWORD_PROPERTY, password);
+
+					
 					LOGGER.info("\u001B[32m Getting platform configuration...\u001B[0m");
 					boxConfiguration = dss.getPlatformConfiguration();
+					LOGGER.debug(boxConfiguration.toString());
 					LOGGER.info("\u001B[32m Getting repository spaces status...\u001B[0m");
 					repositoryBox = dss.queryRepositorySpaces("select *");
+					LOGGER.debug(repositoryBox.toString());
+					
 					LOGGER.info("\u001B[32m Getting AUs status... \u001B[0m");
 					ausFromCurrentBox = dss.queryAus(QUERY);
+					LOGGER.debug(ausFromCurrentBox.toString());
 					
 					LOGGER.info("\u001B[32m Getting peers status...\u001B[0m");
 					peersBox = dss.queryPeers("select *");
+					LOGGER.debug(peersBox.toString());
+					
 					LOGGER.info("\u001B[32m Getting repository status...\u001B[0m");
 					repo = dss.queryRepositories("select *");
+					LOGGER.debug(repo.toString());
+					
 				}
 			}
 			catch (WebServiceException e) {
@@ -716,6 +723,7 @@ public class DaemonStatusWebService {
 			}
 
 			LOGGER.info("\u001B[32m Updating LOCKSS boxes configurations in the database \u001B[0m");
+			
 			// if data from plaftorm configuration is available, update the LOCKSS box table accordingly in the database
 			if (boxConfiguration!=null){
 				//update LOCKSS box config in the LOCKSS_box database
@@ -752,7 +760,7 @@ public class DaemonStatusWebService {
 
 					dbConnection = getDBConnection();
 					preparedStatement = dbConnection.prepareStatement(insertTableSQL, Statement.KEEP_CURRENT_RESULT);
-					preparedStatement.setString(1, "8081");
+					preparedStatement.setString(1, boxUIPort);
 					preparedStatement.setString(2, boxConfiguration.getGroups().get(0).replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(3, boxConfiguration.getV3Identity().replaceAll("\\[|\\]", ""));
 					preparedStatement.setLong(4, boxConfiguration.getUptime());
@@ -767,7 +775,7 @@ public class DaemonStatusWebService {
 					preparedStatement.setInt(12, plnID);
 
 					preparedStatement.setString(13, boxIpAddress);
-					preparedStatement.setString(14, "8081");
+					preparedStatement.setString(14, boxUIPort);
 					preparedStatement.setInt(15, plnID);
 					preparedStatement.setString(16, boxConfiguration.getGroups().get(0).replaceAll("\\[|\\]", ""));
 					preparedStatement.setString(17, boxConfiguration.getV3Identity().replaceAll("\\[|\\]", ""));
@@ -846,10 +854,10 @@ public class DaemonStatusWebService {
 						preparedStatement.setLong(19,currentBoxResult.getInactiveCount());
 						preparedStatement.setLong(20, currentBoxResult.getOrphanedCount());
 
-						//System.out.println(preparedStatement.toString());
+						LOGGER.debug(preparedStatement.toString());
 						preparedStatement.executeUpdate();
 
-						//LOGGER.info("Record is inserted and updated into database table LOCKSS_box_data_current for boxId" + boxId + " Repository Id: " + currentBoxResult.getRepositorySpaceId());
+						LOGGER.debug("Record is inserted and updated into database table LOCKSS_box_data_current for boxId" + boxId + " Repository Id: " + currentBoxResult.getRepositorySpaceId());
 
 					} catch (SQLException e) {
 
@@ -998,7 +1006,7 @@ public class DaemonStatusWebService {
 								preparedStatement.setString(2, currentAU.getName());
 								preparedStatement.setString(3, currentAU.getPluginName());
 								preparedStatement.setString(4, currentAU.getTdbYear());
-								preparedStatement.setString(5, currentAU.getAccessType());
+								preparedStatement.setString(5, (currentAU.getAccessType()!=null)?currentAU.getAccessType():"");
 								preparedStatement.setLong(6, currentAU.getContentSize());
 								preparedStatement.setDouble(7, (currentAU.getRecentPollAgreement()!=null)?currentAU.getRecentPollAgreement():0);
 								preparedStatement.setLong(8, currentAU.getCreationTime());
@@ -1015,7 +1023,7 @@ public class DaemonStatusWebService {
 								preparedStatement.setString(19, (currentAU.getCrawlWindow()!=null)?currentAU.getCrawlWindow():"");
 								preparedStatement.setString(20, currentAU.getLastCrawlResult());
 								preparedStatement.setString(21, currentAU.getLastPollResult());
-								preparedStatement.setString(22, currentAU.getPublishingPlatform());
+								preparedStatement.setString(22, (currentAU.getPublishingPlatform()!=null)?currentAU.getPublishingPlatform():"");
 								preparedStatement.setString(23, (currentAU.getRepositoryPath()!=null)?currentAU.getRepositoryPath():"");
 								preparedStatement.setString(24, (currentAU.getSubscriptionStatus()!=null)?currentAU.getSubscriptionStatus(): "");
 								preparedStatement.setString(25, currentAU.getSubstanceState());
@@ -1028,17 +1036,17 @@ public class DaemonStatusWebService {
 								preparedStatement.setString(30, currentAU.getName());
 								preparedStatement.setString(31, currentAU.getPluginName());
 								preparedStatement.setString(32, currentAU.getTdbYear());
-								preparedStatement.setString(33, currentAU.getAccessType());
+								preparedStatement.setString(33, (currentAU.getAccessType()!=null)?currentAU.getAccessType():"");
 								preparedStatement.setLong(34, currentAU.getContentSize());
 								preparedStatement.setDouble(35, (currentAU.getRecentPollAgreement()!=null)?currentAU.getRecentPollAgreement():0);
 								preparedStatement.setLong(36, currentAU.getCreationTime());
 								preparedStatement.setString(37, currentAU.getAuId());
 								preparedStatement.setString(38, currentAU.getTdbPublisher());
 								preparedStatement.setString(39, currentAU.getVolume());
-								preparedStatement.setLong(40, currentAU.getDiskUsage());
-								preparedStatement.setLong(41, currentAU.getLastCompletedCrawl());
+								preparedStatement.setLong(40, (currentAU.getDiskUsage()!=null)?currentAU.getDiskUsage():0);
+								preparedStatement.setLong(41, (currentAU.getLastCompletedCrawl()!=null)?currentAU.getLastCompletedCrawl():0);
 								preparedStatement.setLong(42, (currentAU.getLastCompletedPoll()!=null)? currentAU.getLastCompletedPoll():0);
-								preparedStatement.setLong(43, currentAU.getLastCrawl());
+								preparedStatement.setLong(43, (currentAU.getLastCrawl()!=null)? currentAU.getLastCrawl():0);
 								preparedStatement.setLong(44, (currentAU.getLastPoll()!= null)?currentAU.getLastPoll():0);
 								preparedStatement.setString(45, currentAU.getCrawlPool());
 								preparedStatement.setString(46, (currentAU.getCrawlProxy()!=null)?currentAU.getCrawlProxy():"");
@@ -1317,53 +1325,14 @@ public class DaemonStatusWebService {
 
 	}
 
-	/**
-	 * Sets the authenticator that will be used by the networking code when the
-	 * HTTP server asks for authentication.
-	 */
-
-	private void authenticate(final String username, final String password) {
+	// basic authentication 
+	private void authenticate(String user, String password) {
 		Authenticator.setDefault(new Authenticator() {
-
 			@Override
 			protected PasswordAuthentication getPasswordAuthentication() {
-
-				return new PasswordAuthentication(username, password.toCharArray());
+				return new PasswordAuthentication(user, password.toCharArray());
 			}
 		});
-	}
-
-	//TODO: Unsuccessful tentative to use form base authentication when SSL is enabled on the box
-	/**
-	 * Sets the authenticator that will be used by the networking code when the
-	 * HTTP server asks for authentication.
-	 *
-	 * @param server the server
-	 * @throws Exception the exception
-	 */
-	private void formAuthenticate(String server) throws Exception{
-		CredentialsProvider credsProvider = new BasicCredentialsProvider();
-		credsProvider.setCredentials(
-				new AuthScope(server, 8081),
-				new UsernamePasswordCredentials("debug", "debuglockss"));
-		CloseableHttpClient httpclient = HttpClients.custom()
-				.setDefaultCredentialsProvider(credsProvider)
-				.build();
-		try {
-			HttpGet httpget = new HttpGet("https://"+ server +":8081/Home");
-
-			LOGGER.info("Executing request " + httpget.getRequestLine());
-			CloseableHttpResponse response = httpclient.execute(httpget);
-			try {
-				LOGGER.info("----------------------------------------");
-				LOGGER.info(response.getStatusLine().toString());
-				LOGGER.info(EntityUtils.toString(response.getEntity()));
-			} finally {
-				response.close();
-			}
-		} finally {
-			httpclient.close();
-		}
 	}
 
 
